@@ -1,0 +1,13 @@
+\documentclass[tikz,border=0pt]{standalone}
+\definecolor{tile}{HTML}{262624}
+\definecolor{clawd}{HTML}{D97757}
+\definecolor{ink}{HTML}{F5EFE6}
+\begin{document}
+\begin{tikzpicture}[scale=4, every node/.style={transform shape}]
+  \fill[tile, rounded corners=88pt] (0,0) rectangle (6,6);
+  % Clawd, from the Claude Code welcome banner, as one shape so no seams show
+  \fill[clawd] (1.625,5.000) rectangle (4.625,4.500) (1.625,4.500) rectangle (2.125,4.000) (2.375,4.500) rectangle (3.875,4.000) (4.125,4.500) rectangle (4.625,4.000) (1.125,4.000) rectangle (5.125,3.500) (1.625,3.500) rectangle (4.625,3.000) (1.875,3.000) rectangle (2.125,2.500) (2.375,3.000) rectangle (2.625,2.500) (3.625,3.000) rectangle (3.875,2.500) (4.125,3.000) rectangle (4.375,2.500);
+  % the LaTeX wordmark, typeset by TeX
+  \node[ink, scale=3.4] at (3,1.35) {\LaTeX};
+\end{tikzpicture}
+\end{document}

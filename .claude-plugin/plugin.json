@@ -1,8 +1,8 @@
 {
   "name": "latex",
   "displayName": "LaTeX",
-  "version": "0.2.0",
-  "description": "Render TeX maths and TikZ diagrams in Claude's replies in the Claude Code desktop app",
+  "version": "0.3.0",
+  "description": "Render TeX maths, TikZ diagrams and LaTeX blocks in Claude's replies in the Claude Code desktop app, in any of 10 LaTeX fonts",
   "author": {
     "name": "Zaahir Ali"
   },
@@ -12,9 +12,29 @@
     "math",
     "mathjax",
     "tikz",
+    "chemistry",
     "mod"
   ],
   "userConfig": {
+    "mathFont": {
+      "type": "string",
+      "title": "Maths font",
+      "description": "mathjax draws instantly in Computer Modern. Any other choice typesets every formula with your local LaTeX in that font, showing MathJax until it is ready.",
+      "default": "mathjax",
+      "options": [
+        "mathjax",
+        "cm",
+        "libertinus",
+        "palatino",
+        "times",
+        "euler",
+        "concrete",
+        "fourier",
+        "stix2",
+        "kpfonts",
+        "cmbright"
+      ]
+    },
     "colorScheme": {
       "type": "string",
       "title": "Maths colour",
@@ -28,8 +48,8 @@
     },
     "tikz": {
       "type": "boolean",
-      "title": "Compile TikZ blocks",
-      "description": "Compile ```tikz and ```tikzcd code blocks with your local TeX install (latex and dvisvgm).",
+      "title": "Compile LaTeX blocks",
+      "description": "Compile ```tikz, ```tikzcd and ```latex code blocks with your local TeX install (latex and dvisvgm).",
       "default": true
     },
     "userMessages": {

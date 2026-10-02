@@ -61,3 +61,22 @@ test('lays out lists with inline maths', async $ => {
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(3)
   await ui.unmount()
 })
+
+test('maps \\bm to bold maths', async $ => {
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply('A vector $\\bm{x} \\in \\mathbb{R}^n$.') })
+  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
+  await ui.unmount()
+})
+
+test('draws chemistry with mhchem', async $ => {
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply('$$\\ce{CO2 + H2O <=> H2CO3}$$') })
+  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
+  await ui.unmount()
+})
+
+test('shows an unknown command as red source, not as an SVG', async $ => {
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply('Try $\\notacommand{x}$ now.') })
+  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
+  expect(await ui.find({ type: 'Text', text: /notacommand/ })).toBeDefined()
+  await ui.unmount()
+})

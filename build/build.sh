@@ -8,6 +8,7 @@ npm install --no-audit --no-fund
 F=node_modules/mathjax-full/js/output
 rm -rf out
 bun build entry.ts $F/svg/fonts/tex/normal.js $F/svg/fonts/tex/bold.js $F/common/fonts/tex/normal.js \
+  node_modules/mathjax-full/js/input/tex/mhchem/MhchemConfiguration.js node_modules/mathjax-full/js/input/tex/physics/PhysicsConfiguration.js \
   --splitting --format esm --target browser --minify --outdir out
 rm -rf ../hooks/mathjax/*.js
 cp out/entry*.js ../hooks/mathjax/

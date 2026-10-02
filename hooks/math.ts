@@ -17,6 +17,10 @@ const DARK_INK = '#ece9e3'
 
 const cache = new Map<string, string | null>()
 
+// LaTeX documents often use \bm from the bm package. MathJax 3 has no bm
+// package, so map it to \boldsymbol.
+tex2svg('\\newcommand{\\bm}[1]{\\boldsymbol{#1}}', false)
+
 export function inkStyle(scheme: ColorScheme): string {
   if (scheme === 'light') return `<style>svg{color:${LIGHT_INK}}</style>`
   if (scheme === 'dark') return `<style>svg{color:${DARK_INK}}</style>`

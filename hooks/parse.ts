@@ -9,7 +9,7 @@ export type Piece =
   | { kind: 'md'; text: string }
   | { kind: 'display'; tex: string }
   | { kind: 'inline'; lines: Line[] }
-  | { kind: 'tikz'; lang: 'tikz' | 'tikzcd'; source: string }
+  | { kind: 'block'; lang: 'tikz' | 'tikzcd' | 'latex'; source: string }
 
 export const NBSP = ' '
 
@@ -22,7 +22,7 @@ const INLINE_RE =
 const FENCE_RE = /^\s*(```+|~~~+)\s*([\w-]*)/
 
 export function looksLikeMath(text: string): boolean {
-  return /\$|\\\(|\\\[|\\begin\{|```\s*tikz/.test(text)
+  return /\$|\\\(|\\\[|\\begin\{|```\s*(tikz|latex)/.test(text)
 }
 
 function hasInlineMath(text: string): boolean {
@@ -114,7 +114,7 @@ export function parseLine(raw: string): Line {
   return { prefix, heading, spans }
 }
 
-export function parse(text: string, options: { tikz: boolean }): Piece[] {
+export function parse(text: string, options: { blocks: boolean }): Piece[] {
   const pieces: Piece[] = []
   let md: string[] = []
   const flush = () => {
@@ -139,10 +139,10 @@ export function parse(text: string, options: { tikz: boolean }): Piece[] {
     if (fence) {
       const lang = (fence[2] ?? '').toLowerCase()
       const closed = /\n\s*(```+|~~~+)\s*$/.test(block)
-      if (options.tikz && closed && (lang === 'tikz' || lang === 'tikzcd')) {
+      if (options.blocks && closed && (lang === 'tikz' || lang === 'tikzcd' || lang === 'latex')) {
         flush()
         const body = block.split('\n').slice(1, -1).join('\n')
-        pieces.push({ kind: 'tikz', lang, source: body })
+        pieces.push({ kind: 'block', lang, source: body })
       } else {
         md.push(block)
       }
