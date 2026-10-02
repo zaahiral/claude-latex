@@ -41,6 +41,18 @@ import {
 const version = atom({ plugin: 'latex', key: 'version' } as const, 0)
 // Compiles run side by side, each in its own folder.
 const MAX_WORKERS = 3
+// Interrupted compiles are retried this many times.
+const MAX_RETRIES = 2
+const retries = new Map<string, number>()
+
+// What a failed run looks like to the reader.
+function describeFailure(error: unknown): Rendered {
+  const text = String(error)
+  if (/time|still running/i.test(text)) {
+    return { error: 'LaTeX ran for 60 seconds without finishing, so it was stopped. The block may loop forever.' }
+  }
+  return { error: text, interrupted: true }
+}
 // The app's limit on one Svg element is 131072 characters. Leave room for
 // the color style withInk adds.
 const MAX_SVG_CHARS = 131072 - 400
@@ -105,7 +117,7 @@ function formatFor($: Engine, doc: TexDoc): Promise<string | null> {
 
 // Runs latex then dvisvgm in a fresh folder `dir`, then removes it.
 // Returns the SVG pages in order, or the LaTeX error.
-async function runTex($: Engine, dir: string, doc: TexDoc, dvisvgmArgs: string[]): Promise<string[] | { error: string }> {
+async function runTex($: Engine, dir: string, doc: TexDoc, dvisvgmArgs: string[]): Promise<string[] | { error: string; interrupted?: boolean }> {
   const { bin } = tex!
   const latex = async (source: string, fmt: string | null) => {
     await $.fs.write(`${dir}/d.tex`, source)
@@ -123,12 +135,16 @@ async function runTex($: Engine, dir: string, doc: TexDoc, dvisvgmArgs: string[]
       run = await latex(fullDocument(doc), null)
       if (run.exitCode === 0) brokenFormats.add(formatName(doc))
     }
-    if (run.exitCode !== 0) return { error: texError(run.stdout) }
+    if (run.exitCode !== 0) {
+      // A run with no error line was stopped from outside, not by the TeX.
+      const isTexError = run.stdout.includes('\n!') || run.stdout.startsWith('!')
+      return isTexError ? { error: texError(run.stdout) } : { error: 'The compile was interrupted.', interrupted: true }
+    }
     const dvisvgm = await $.process.run([`${bin}/dvisvgm`, '--no-fonts', '--precision=2', ...dvisvgmArgs, 'd.dvi'], {
       cwd: dir,
       timeoutMs: 60000,
     })
-    if (dvisvgm.exitCode !== 0) return { error: dvisvgm.stderr.trim().split('\n').slice(-3).join('\n') }
+    if (dvisvgm.exitCode !== 0) return { error: 'dvisvgm stopped before writing the SVG.', interrupted: true }
     const pages = (await $.fs.list(dir))
       .map(entry => ({ name: entry.name, page: entry.name === 'd.svg' ? 1 : pageNumber(entry.name) }))
       .filter((p): p is { name: string; page: number } => p.page !== undefined)
@@ -215,6 +231,7 @@ export const register: Register = (on, options) => {
   const latexFont: LatexFont | null = isLatexFont(fontOption) ? fontOption : null
   const blocksOn = options.tikz !== false
   const renderUser = options.userMessages !== false
+  const showCopy = options.copyButton === true
 
   on('session.start', async ($, e, next) => {
     const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
@@ -234,6 +251,11 @@ export const register: Register = (on, options) => {
       const ready = await findTex($, home, path).catch(() => false)
       if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so math uses MathJax')
       if (ready) {
+        // A compile killed mid-run (a reload, a crash) leaves its folder.
+        // Clear folders older than ten minutes, which no live compile uses.
+        void $.process
+          .run(['/usr/bin/find', `${tex!.cacheDir}/build`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+10', '-exec', '/bin/rm', '-rf', '{}', '+'])
+          .catch(() => undefined)
         // Build the common formats now, in the background, so the first
         // diagram does not wait for them.
         const font = latexFont ?? 'cm'
@@ -260,7 +282,14 @@ export const register: Register = (on, options) => {
             void (async () => {
               if (block) {
                 const font = latexFont ?? 'cm'
-                setResult(block.key, await compileBlock($, block, font).catch(error => ({ error: String(error) })))
+                const result = await compileBlock($, block, font).catch(describeFailure)
+                const tries = retries.get(block.key) ?? 0
+                if ('error' in result && result.interrupted && tries < MAX_RETRIES) {
+                  retries.set(block.key, tries + 1)
+                  requestBlock(block)
+                } else {
+                  setResult(block.key, result)
+                }
               } else if (latexFont) {
                 await compileMath($, batch, latexFont).catch(() => {
                   for (const job of batch) setResult(job.key, { error: 'compile failed' })
@@ -333,6 +362,7 @@ export const register: Register = (on, options) => {
         }
         return 'svg' in result ? { svg: withInk(result.svg, scheme) } : result
       },
+      showCopy,
       onCopy: (text, press) => {
         void $.ui.copy({ text, surface: press.surface }).then(r => {
           if (r.isCopied) $.ui.toast('TeX copied')

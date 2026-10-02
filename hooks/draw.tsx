@@ -15,6 +15,8 @@ export type DrawContext = {
   formula: (tex: string, display: boolean) => string | null
   // A compiled block, or undefined while it is compiling.
   block: (piece: Extract<Piece, { kind: 'block' }>) => Rendered | undefined
+  // Whether to draw a Copy TeX button under display math and blocks.
+  showCopy: boolean
   // What pressing Copy TeX does with `text`.
   onCopy: (text: string, press: UiPressArgument) => void
 }
@@ -53,9 +55,8 @@ export function drawMessage(pieces: Piece[], ctx: DrawContext): RenderElement {
     )
   }
 
-  const copyButton = (key: string, text: string) => (
-    <Button key={key} label="Copy TeX" plain dimColor onPress={press => ctx.onCopy(text, press)} />
-  )
+  const copyButton = (key: string, text: string) =>
+    ctx.showCopy ? <Button key={key} label="Copy TeX" plain dimColor onPress={press => ctx.onCopy(text, press)} /> : null
 
   return (
     <Box flexDirection="column">

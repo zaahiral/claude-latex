@@ -3,7 +3,9 @@
 // only a function in the hooks module's own file may call the engine.
 
 export type BlockLang = 'tikz' | 'tikzcd' | 'latex'
-export type Rendered = { svg: string } | { error: string }
+// `interrupted`: stopped from outside (a reload, a killed process), not a
+// TeX error, so worth one more try.
+export type Rendered = { svg: string } | { error: string; interrupted?: boolean }
 export type MathJob = { key: string; tex: string; display: boolean }
 // A document in two parts. `base` is the class and the fixed preamble, the
 // same for every document of one kind and font, so it can be saved once as a

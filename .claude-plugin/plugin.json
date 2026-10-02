@@ -58,6 +58,12 @@
       "description": "Also render math in the messages you send.",
       "default": true
     },
+    "copyButton": {
+      "type": "boolean",
+      "title": "Copy TeX button",
+      "description": "Show a Copy TeX button under each display formula and LaTeX block.",
+      "default": false
+    },
     "macrosFile": {
       "type": "string",
       "title": "Macros file",

@@ -15,7 +15,8 @@ test('draws inline and display math as SVG on the desktop', async $ => {
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(SAMPLE) })
   const svgs = await ui.findAll({ type: 'Svg' })
   expect(svgs).toHaveLength(2)
-  expect(await ui.find({ type: 'Button', key: 'copy-1' })).toBeDefined()
+  // Copy TeX is off by default.
+  expect(await ui.findAll({ type: 'Button' })).toHaveLength(0)
   expect(await ui.find({ type: 'Markdown', text: /costs \$5 and \$10/ })).toBeDefined()
   await ui.unmount()
 })
@@ -171,5 +172,11 @@ test('with a LaTeX font, typesets a message in one run and swaps it in', { optio
   expect(source).toBeDefined()
   const after = await ui.findAll({ type: 'Svg' })
   expect(after.map(s => String(s.props.source).match(/width='(\d)pt'/)?.[1])).toEqual(['1', '2'])
+  await ui.unmount()
+})
+
+test('draws Copy TeX buttons when the setting is on', { options: { copyButton: true } }, async $ => {
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply('$$a^2 + b^2 = c^2$$') })
+  expect(await ui.find({ type: 'Button', key: 'copy-0' })).toBeDefined()
   await ui.unmount()
 })
