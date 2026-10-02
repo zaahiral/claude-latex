@@ -49,6 +49,10 @@ const PANE = 'latex-settings'
 // keep the app's drawing.
 const OWN_MESSAGES = new Set(['composer', 'sdk', 'bridge', 'unclassified'])
 
+// A light box behind your own messages, readable on light and dark themes.
+const USER_BUBBLE = '#8080801f'
+let probedUserDrawing = false
+
 const FONT_CHOICES = ['mathjax', 'cm', 'libertinus', 'palatino', 'times', 'euler', 'concrete', 'fourier', 'stix2', 'kpfonts', 'cmbright']
 // Compiles run side by side, each in its own folder.
 const MAX_WORKERS = 3
@@ -70,6 +74,77 @@ const MAX_SVG_CHARS = 131072 - 400
 
 // Where latex and dvisvgm live, and where compiled SVGs are kept.
 let tex: { bin: string; cacheDir: string } | null = null
+// A log the mod writes to ~/.cache/claude-latex/debug/, readable without
+// the app: each setup step, its time, and why it failed.
+const debugLines: string[] = []
+let debugDir = ''
+
+function debug($: Engine, line: string): void {
+  debugLines.push(`${new Date().toISOString()} ${line}`)
+  if (debugDir) void $.fs.write(`${debugDir}/setup.log`, debugLines.join('\n') + '\n').catch(() => undefined)
+}
+
+// Runs one setup step on its own, so a failure or a hang in one never
+// blocks the others.
+async function step($: Engine, name: string, run: () => Promise<unknown>): Promise<void> {
+  const t0 = Date.now()
+  try {
+    await run()
+    debug($, `ok   ${name} ${Date.now() - t0} ms`)
+  } catch (error) {
+    debug($, `FAIL ${name} ${Date.now() - t0} ms: ${String(error)}`)
+  }
+}
+
+// Compiles queued blocks and formulas, up to MAX_WORKERS at once, and
+// redraws waiting messages as results land.
+let workersStarted = false
+function startWorkers($: Engine, latexFont: LatexFont | null): void {
+  if (workersStarted) return
+  workersStarted = true
+  let running = 0
+  let finished = 0
+  let lastBump = 0
+  $.clock.every(100, () => {
+    // Redraw waiting messages at most every 400 ms, and once more when
+    // the queue drains, rather than once per compile.
+    const now = Date.now()
+    if (finished > 0 && (now - lastBump >= 400 || (running === 0 && !hasQueued()))) {
+      finished = 0
+      lastBump = now
+      void update($, version, n => n + 1).catch(() => undefined)
+    }
+    while (running < MAX_WORKERS && hasQueued()) {
+      const block = takeBlock()
+      const batch = block || !latexFont ? [] : takeMathBatch(60)
+      if (!block && batch.length === 0) break
+      running += 1
+      void (async () => {
+        if (block) {
+          const font = latexFont ?? 'cm'
+          const result = await compileBlock($, block, font).catch(describeFailure)
+          const tries = retries.get(block.key) ?? 0
+          if ('error' in result && result.interrupted && tries < MAX_RETRIES) {
+            retries.set(block.key, tries + 1)
+            requestBlock(block)
+          } else {
+            setResult(block.key, result)
+          }
+        } else if (latexFont) {
+          await compileMath($, batch, latexFont).catch(() => {
+            for (const job of batch) setResult(job.key, { error: 'compile failed' })
+          })
+        }
+      })()
+        .catch(() => undefined)
+        .finally(() => {
+          running -= 1
+          finished += 1
+        })
+    }
+  })
+}
+
 // A macOS sandbox profile every TeX run goes through, when sandbox-exec works
 // here. A LaTeX block can \\input any file by its absolute path, and TeX's own
 // openin_any setting does not stop that, so the profile denies reading the
@@ -288,89 +363,66 @@ export const register: Register = (on, options) => {
   const configKeys = new Map<string, string>()
 
   on('session.start', async ($, e, next) => {
-    try {
-      for (const row of await $.config.list()) {
-        const m = row.key.match(/^latex(@[\w-]+)?\.(\w+)$/)
-        if (m?.[2]) configKeys.set(m[2], row.key)
-      }
-    } catch {
-      // No settings rows here (tests): the pane shows values without buttons.
-    }
-    await $.command.register({ name: 'latex', description: 'Open the LaTeX mod settings' }).catch(() => undefined)
-    if (!(await $.store.get(INTRO_SEEN).catch(() => true))) await update($, intro, () => true)
-    const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
-    const macrosPath = String(options.macrosFile || '~/.claude/latex-macros.tex').replace(/^~(?=\/)/, home)
-    try {
-      if (await $.fs.exists(macrosPath)) {
-        macros = await $.fs.read(macrosPath)
-        const error = definePreamble(macros)
-        if (error) $.ui.log(`latex: ${macrosPath}: ${error}`)
-      }
-    } catch {
-      // No file system here (tests, a remote host): no macros.
-    }
+    const started = await next(e)
+    // Setup runs after the session is ready, so it never holds it up. TeX
+    // comes first: it is what most of the mod needs.
+    void (async () => {
+      const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
+      debugDir = home ? `${home}/.cache/claude-latex/debug` : ''
+      debug($, `session start, options ${JSON.stringify(options)}`)
 
-    if (blocksOn || latexFont) {
-      const path = (await $.env.get('PATH').catch(() => undefined)) ?? ''
-      const ready = await findTex($, home, path).catch(() => false)
-      if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so math uses MathJax')
-      if (ready) {
-        await setupSandbox($, home).catch(() => undefined)
-        // A compile killed mid-run (a reload, a crash) leaves its folder.
-        // Clear folders older than ten minutes, which no live compile uses.
-        void $.process
-          .run(['/usr/bin/find', `${tex!.cacheDir}/build`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+10', '-exec', '/bin/rm', '-rf', '{}', '+'])
-          .catch(() => undefined)
-        // Build the common formats now, in the background, so the first
-        // diagram does not wait for them.
-        const font = latexFont ?? 'cm'
-        void formatFor($, documentForBlock({ key: '', lang: 'tikz', source: '' }, font, ''))
-        void formatFor($, documentForBlock({ key: '', lang: 'latex', source: '' }, font, ''))
-        if (latexFont) void formatFor($, documentForMath([], latexFont, ''))
-        let running = 0
-        let finished = 0
-        let lastBump = 0
-        $.clock.every(100, () => {
-          // Redraw waiting messages at most every 400 ms, and once more when
-          // the queue drains, rather than once per compile.
-          const now = Date.now()
-          if (finished > 0 && (now - lastBump >= 400 || (running === 0 && !hasQueued()))) {
-            finished = 0
-            lastBump = now
-            void update($, version, n => n + 1).catch(() => undefined)
-          }
-          while (running < MAX_WORKERS && hasQueued()) {
-            const block = takeBlock()
-            const batch = block || !latexFont ? [] : takeMathBatch(60)
-            if (!block && batch.length === 0) break
-            running += 1
-            void (async () => {
-              if (block) {
-                const font = latexFont ?? 'cm'
-                const result = await compileBlock($, block, font).catch(describeFailure)
-                const tries = retries.get(block.key) ?? 0
-                if ('error' in result && result.interrupted && tries < MAX_RETRIES) {
-                  retries.set(block.key, tries + 1)
-                  requestBlock(block)
-                } else {
-                  setResult(block.key, result)
-                }
-              } else if (latexFont) {
-                await compileMath($, batch, latexFont).catch(() => {
-                  for (const job of batch) setResult(job.key, { error: 'compile failed' })
-                })
-              }
-            })()
-              .catch(() => undefined)
-              .finally(() => {
-                running -= 1
-                finished += 1
-              })
-          }
+      if (blocksOn || latexFont) {
+        let ready = false
+        await step($, 'find TeX', async () => {
+          const path = (await $.env.get('PATH').catch(() => undefined)) ?? ''
+          ready = await findTex($, home, path)
+          debug($, `     TeX ${ready ? `at ${tex?.bin}` : 'not found'}`)
         })
+        if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so math uses MathJax')
+        if (ready) {
+          await step($, 'sandbox', async () => {
+            await setupSandbox($, home)
+            debug($, `     sandbox ${sandbox ? 'on' : 'off'}`)
+          })
+          // A compile killed mid-run (a reload, a crash) leaves its folder.
+          // Clear folders older than ten minutes, which no live compile uses.
+          void $.process
+            .run(['/usr/bin/find', `${tex!.cacheDir}/build`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+10', '-exec', '/bin/rm', '-rf', '{}', '+'])
+            .catch(() => undefined)
+          // Build the common formats now, in the background, so the first
+          // diagram does not wait for them.
+          const font = latexFont ?? 'cm'
+          void formatFor($, documentForBlock({ key: '', lang: 'tikz', source: '' }, font, ''))
+          void formatFor($, documentForBlock({ key: '', lang: 'latex', source: '' }, font, ''))
+          if (latexFont) void formatFor($, documentForMath([], latexFont, ''))
+          startWorkers($, latexFont)
+          // Messages drawn before TeX was found left their blocks as code.
+          // Draw them again now that blocks can compile.
+          await update($, version, n => n + 1).catch(() => undefined)
+        }
       }
-    }
-    return next(e)
+
+      await step($, 'macros', async () => {
+        const macrosPath = String(options.macrosFile || '~/.claude/latex-macros.tex').replace(/^~(?=\/)/, home)
+        if (await $.fs.exists(macrosPath)) {
+          macros = await $.fs.read(macrosPath)
+          const error = definePreamble(macros)
+          if (error) $.ui.log(`latex: ${macrosPath}: ${error}`)
+        }
+      })
+      await step($, 'settings rows', async () => {
+        for (const row of await $.config.list()) {
+          const m = row.key.match(/^latex(@[\w-]+)?\.(\w+)$/)
+          if (m?.[2]) configKeys.set(m[2], row.key)
+        }
+        debug($, `     keys ${JSON.stringify([...configKeys.values()])}`)
+      })
+      await step($, 'register /latex', () => $.command.register({ name: 'latex', description: 'Open the LaTeX mod settings' }))
+      await step($, 'welcome band', async () => {
+        if (!(await $.store.get(INTRO_SEEN))) await update($, intro, () => true)
+      })
+    })()
+    return started
   })
 
   on('command.run', { command: 'latex' }, async $ => {
@@ -384,15 +436,34 @@ export const register: Register = (on, options) => {
     if (isUser && (e.props.task || e.props.from || !OWN_MESSAGES.has(e.props.origin.kind))) return next(e)
     const text = isUser ? keepLineBreaks(e.props.text) : e.props.text
     const withMath = !isUser || renderUser
+    const { Box } = $.ui.resolve(e)
+    // Your own messages sit in a light box, so they stay apart from replies.
+    const asYours = (tree: ReturnType<typeof drawMessage>) =>
+      isUser ? (
+        <Box flexDirection="column" backgroundColor={USER_BUBBLE} paddingX={1} paddingY={1}>
+          {tree}
+        </Box>
+      ) : (
+        tree
+      )
+    if (isUser && !probedUserDrawing && debugDir) {
+      probedUserDrawing = true
+      void next(e)
+        .then(drawn => $.fs.write(`${debugDir}/user-message-drawing.json`, JSON.stringify(drawn, null, 1)))
+        .catch(() => undefined)
+    }
     const markdownOnly = () => {
       const { Markdown } = $.ui.resolve(e)
-      return <Markdown text={text} />
+      return asYours(<Markdown text={text} />)
     }
+    // Before TeX is found, blocks are left as code. Listen for the redraw
+    // that follows TeX setup.
+    if (blocksOn && tex === null && /```\s*(tikz|latex)/.test(text)) await read($, version)
     if (!withMath || !looksLikeMath(text)) return isUser && userMarkdown ? markdownOnly() : next(e)
     const pieces = parse(text, { blocks: blocksOn && tex !== null })
     if (!pieces.some(p => p.kind !== 'md')) return isUser && userMarkdown ? markdownOnly() : next(e)
 
-    const { Box, Text, Markdown, Svg, Button } = $.ui.resolve(e)
+    const { Text, Markdown, Svg, Button } = $.ui.resolve(e)
     const useLatex = latexFont !== null && tex !== null
     let isWaiting = false
 
@@ -449,7 +520,7 @@ export const register: Register = (on, options) => {
     // Only a message still waiting on a compile listens for finished
     // compiles. A finished message is never redrawn by them.
     if (isWaiting) await read($, version)
-    return tree
+    return asYours(tree)
   })
 
   // A one-time band above the prompt: what the mod does, where its settings are.

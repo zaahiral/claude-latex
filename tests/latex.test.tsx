@@ -11,6 +11,11 @@ const SAMPLE = [
 
 const reply = (text: string) => ({ text, isFirstOfReply: true })
 
+// Setup runs in the background after session start. Let it finish.
+async function settle(clock: { advance: (ms: number) => Promise<void> }) {
+  for (let i = 0; i < 5; i++) await clock.advance(0)
+}
+
 test('draws inline and display math as SVG on the desktop', async $ => {
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(SAMPLE) })
   const svgs = await ui.findAll({ type: 'Svg' })
@@ -134,6 +139,7 @@ test('a LaTeX block redraws by itself once compiled', async ($, on) => {
   mock.env(on, { HOME: '/Users/test', PATH: '' })
   const { runs, sandboxed, files } = fakeTex(on)
   await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  await settle(clock)
   // The sandbox profile is written, probed and used for every TeX run.
   expect(files.get('/Users/test/.cache/claude-latex/sandbox.sb')).toContain('(deny file-read* (subpath "/Users/test")')
   const text = 'A square:\n\n```tikzcd\nA \\arrow[r] & B\n```'
@@ -155,6 +161,7 @@ test('compiles blocks side by side, each in its own folder', async ($, on) => {
   mock.env(on, { HOME: '/Users/test', PATH: '' })
   const { runs } = fakeTex(on)
   await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  await settle(clock)
   const text = ['```tikz', '\\draw (0,0) -- (1,1);', '```', '', '```latex', '\\usepackage{bussproofs}', 'x', '```', '', '```tikzcd', 'A & B', '```'].join('\n')
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
   await clock.advance(100)
@@ -170,6 +177,7 @@ test('with a LaTeX font, typesets a message in one run and swaps it in', { optio
   mock.env(on, { HOME: '/Users/test', PATH: '' })
   const { runs, files } = fakeTex(on, 2)
   await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  await settle(clock)
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply('Both $a^2$ and $b^2$ here.') })
   const before = await ui.findAll({ type: 'Svg' })
   expect(before).toHaveLength(2)
