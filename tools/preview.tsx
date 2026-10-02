@@ -1,7 +1,7 @@
 // Draws Claude replies the way the mod does, into an HTML page you can open
 // in any browser. It uses the mod's own parser, MathJax build and drawing
 // code (hooks/draw.tsx), so what you see is the tree the mod hands the app.
-// The app's own Markdown and spacing are approximated.
+// It checks the mod output only. It is not how the Code tab paints it.
 //
 //   bun tools/preview.tsx reply.md [more.md ...] [--out page.html] [--dark]
 //   bun tools/preview.tsx --session ~/.claude/projects/<dir>/<id>.jsonl [--last 5] [--grep text]
