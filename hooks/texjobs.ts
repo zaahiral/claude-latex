@@ -149,11 +149,16 @@ function displayBody(tex: string): string {
     .replace(/\\label\{[^}]*\}/g, '')
 }
 
+// Commands that only work in the preamble, or belong there. Lines that start
+// with one of these at the top of a block are moved into the preamble.
+const PREAMBLE_LINE =
+  /^\s*(\\usepackage|\\RequirePackage|\\usetikzlibrary|\\usepgfplotslibrary|\\pgfplotsset|\\tikzset|\\newcommand|\\renewcommand|\\providecommand|\\DeclareMathOperator|\\DeclareMathAlphabet|\\DeclareSymbolFont|\\SetSymbolFont|\\newtheorem|\\theoremstyle|\\definecolor|\\colorlet|\\setlength|\\tdplotsetmaincoords|%|$)/
+
 export function documentForBlock(job: BlockJob, font: LatexFont, macros: string): TexDoc {
   // Lines that belong in the preamble may lead the block.
   const lines = job.source.split('\n')
   const leading: string[] = []
-  while (lines.length && /^\s*(\\usetikzlibrary|\\usepackage|\\usepgfplotslibrary|\\pgfplotsset|\\tikzset|\\newcommand|\\DeclareMathOperator|%|$)/.test(lines[0] ?? 'x')) {
+  while (lines.length && PREAMBLE_LINE.test(lines[0] ?? 'x')) {
     leading.push(lines.shift()!)
   }
   let body = lines.join('\n')
