@@ -51,7 +51,27 @@ test('shows a bad formula as red source', async $ => {
   await ui.unmount()
 })
 
-test('keeps the native bubble and draws your math under it', async ($, on) => {
+test('with the rendered setting, draws your message in a bubble over the app row kept for its controls', { options: { userBubble: 'rendered' } }, async ($, on) => {
+  on('ui.render', async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{`app row: ${String((e.props as { text?: string }).text)}`}</Text>
+  })
+  const ui = await $.ui.mount({
+    plugin: 'latex',
+    surface: 'desktop',
+    component: 'UserMessage',
+    props: { text: 'why is $\\mathbb{E}[X^2] \\ge \\mathbb{E}[X]^2$ and **this** bold?', origin: { kind: 'composer' }, isExpanded: true } as never,
+  })
+  // The app's row is there once, with its text replaced, for its controls.
+  expect(await ui.findAll({ type: 'Text', text: /app row/ })).toHaveLength(1)
+  expect(await ui.find({ type: 'Text', text: /app row: ⋯/ })).toBeDefined()
+  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
+  expect(await ui.find({ type: 'Text', text: /this/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'copy-message' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('with the under setting, keeps the native bubble and draws your math under it', { options: { userBubble: 'under' } }, async ($, on) => {
   on('ui.render', async ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>native bubble</Text>
@@ -66,6 +86,55 @@ test('keeps the native bubble and draws your math under it', async ($, on) => {
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
   // Only the math is drawn under the bubble, not the prose again.
   expect(await ui.find({ type: 'Text', text: /bold/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('reads formulas left to right, and leaves code spans alone', async $ => {
+  const text = 'Adjacent $a$$b$ here.\n\nCode `$$PATH$$` and `$x$` stay.\n\n$$c^2$$\n\nNested $\\text{if $x>0$ then } y$ and an empty $$ $$ pair.\n\n$$d^2$$'
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
+  const alts = (await ui.findAll({ type: 'Svg' })).map(svg => String(svg.props.alt))
+  expect(alts).toEqual(['a', 'b', 'c^2', '\\text{if $x>0$ then } y', 'd^2'])
+  await ui.unmount()
+})
+
+test('a macro defined in one formula does not reach the next', async $ => {
+  const text = 'First $\\renewcommand{\\alpha}{\\text{changed}}\\alpha$ then $\\alpha$.'
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
+  const svgs = await ui.findAll({ type: 'Svg' })
+  expect(svgs).toHaveLength(2)
+  expect(String(svgs[1]?.props.source)).not.toContain('mtext')
+  await ui.unmount()
+})
+
+test('lays out a table with math, and draws links and emphasis beside math', async $ => {
+  const text = [
+    '| Name | Formula |',
+    '|---|---|',
+    '| Absolute value | $|x|$ and $a \\mid b$ |',
+    '',
+    'A [link](https://example.com/zeta) next to $\\zeta(2)$, then _italic_ and ~~struck~~.',
+  ].join('\n')
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
+  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(3)
+  expect(await ui.find({ type: 'Link' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Absolute/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /~~|_italic_/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a message with too much math for one drawing hands the rest to the app', async $ => {
+  const formula = (k: number) =>
+    `$$\\det\\begin{pmatrix} 1 & x_1 & x_1^2 & \\cdots & x_1^{${k}} \\\\ 1 & x_2 & x_2^2 & \\cdots & x_2^{n-1} \\\\ \\vdots & \\vdots & \\vdots & \\ddots & \\vdots \\\\ 1 & x_n & x_n^2 & \\cdots & x_n^{n-1} \\end{pmatrix} = \\prod_{1 \\le i < j \\le n} (x_j - x_i) \\sum_{n=1}^{\\infty} \\frac{1}{n^s} \\oint_{\\gamma} \\frac{f(z)}{z-a}\\,dz$$`
+  const text = Array.from({ length: 36 }, (_, k) => formula(k)).join('\n\n')
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
+  const svgs = await ui.findAll({ type: 'Svg' })
+  expect(svgs.length).toBeGreaterThan(5)
+  expect(svgs.length).toBeLessThan(36)
+  // What is drawn stays under the size the desktop app accepts.
+  expect(svgs.reduce((n, svg) => n + String(svg.props.source).length, 0)).toBeLessThan(235_000)
+  expect(await ui.find({ type: 'Text', text: /more math than/ })).toBeDefined()
+  // The formulas past the limit reach the app's Markdown as they were written.
+  expect(await ui.find({ type: 'Markdown', text: /x_1\^\{23\}/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -207,27 +276,54 @@ test('draws Copy TeX buttons when the setting is on', { options: { copyButton: t
 
 const own = (text: string) => ({ text, origin: { kind: 'composer' }, isExpanded: true }) as never
 
-test('a full rendered copy goes under the bubble when that setting is on', { options: { userMarkdown: true } }, async ($, on) => {
+test('with the rendered setting, your Markdown message keeps its line breaks', { options: { userBubble: 'rendered' } }, async ($, on) => {
   on('ui.render', async ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>native bubble</Text>
   })
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('**bold** and a list:\n- one\n- two\nline one\nline two') })
-  expect(await ui.find({ type: 'Text', text: /native bubble/ })).toBeDefined()
   const md = await ui.find({ type: 'Markdown' })
   expect(String(md?.props.text)).toContain('line one  \nline two')
   await ui.unmount()
 })
 
-test('a message with no math keeps only the native bubble', async ($, on) => {
+test('a message with nothing to render keeps the native bubble', async ($, on) => {
   on('ui.render', async ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>native bubble</Text>
   })
-  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('**bold** only') })
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('plain words, 2 * 3 * 4 and snake_case_name, costs $5') })
   expect(await ui.find({ type: 'Text', text: /native bubble/ })).toBeDefined()
   expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
   await ui.unmount()
+})
+
+test('your messages are left alone unless a setting says otherwise', async ($, on) => {
+  on('ui.render', async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>native bubble</Text>
+  })
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('**bold** and $x^2$') })
+  expect(await ui.find({ type: 'Text', text: /native bubble/ })).toBeDefined()
+  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('tells the model how math renders, where the mod draws', async ($, on) => {
+  on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'You are an agent.', scope: 'shared' as const }] }))
+  const facts = { model: 'claude', promptModel: 'claude', tools: [], outputStyle: null, traits: [] }
+  const onDesktop = await $.prompt.compose({ ...facts, surfaces: ['desktop'] } as never)
+  const note = onDesktop.sections.find(section => section.id === 'latex:rendering')
+  expect(note?.text).toContain('235 KB')
+  expect(note?.text).toContain('```tex')
+  const inTerminal = await $.prompt.compose({ ...facts, surfaces: ['terminal'] } as never)
+  expect(inTerminal.sections.map(section => section.id)).toEqual(['intro'])
+})
+
+test('the note to the model can be turned off', { options: { tellModel: false } }, async ($, on) => {
+  on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'You are an agent.', scope: 'shared' as const }] }))
+  const composed = await $.prompt.compose({ model: 'claude', promptModel: 'claude', tools: [], outputStyle: null, traits: [], surfaces: ['desktop'] } as never)
+  expect(composed.sections.map(section => section.id)).toEqual(['intro'])
 })
 
 test('leaves task notifications to the app', async ($, on) => {

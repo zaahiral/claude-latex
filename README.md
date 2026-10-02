@@ -56,7 +56,11 @@ Dollar amounts are left alone. `$5 and $10` stays as text, because an opening `$
 
 ### Your own messages
 
-Your message keeps the app's own bubble, with its copy button. Under it, the mod shows the math and diagrams from your message, rendered, so you can check what you typed. Turn on **Full rendered copy of your messages** to show the whole message rendered under the bubble, Markdown included.
+Your own messages are left as typed. Two settings change that.
+
+Set **Your messages** to `under` to keep the app's bubble and show the math and diagrams from your message under it, rendered, so you can check what you typed.
+
+Set it to `rendered` to draw the whole message as Markdown with its math, the way AI Studio shows a sent message. This is experimental. A mod cannot draw inside the app's bubble, so the mod draws a bubble of its own with a Copy button. The app's own row stays under it as a small "⋯" pill, because the time, rewind and fork controls belong to that row. A message with nothing to render keeps the app's bubble.
 
 ## Fonts
 
@@ -75,8 +79,8 @@ Run `/latex` to open the settings pane. Each change applies at once.
 | Math font | `mathjax` | MathJax, or one of 10 LaTeX fonts typeset by your TeX install |
 | Math color | `auto` | `auto` follows your system's light or dark setting. Pick `light` or `dark` if the app's theme differs |
 | Compile LaTeX blocks | on | Compile ` ```tikz `, ` ```tikzcd ` and ` ```latex ` blocks |
-| Math under your messages | on | Show the math and diagrams from your messages under the bubble |
-| Full rendered copy of your messages | off | Show your whole message rendered under the bubble |
+| Your messages | `off` | `off` leaves your messages as typed. `under` shows the math from your message under the app's bubble. `rendered` (experimental) draws the message as Markdown with math in its own bubble |
+| Tell the model how math renders here | on | Adds a short note to the system prompt: the syntax that renders, what a code block compiles, and the size limits of one reply |
 | Copy TeX button | off | A button under each display formula and block that copies its source |
 | Macros file | `~/.claude/latex-macros.tex` | Your own `\newcommand` and `\DeclareMathOperator` lines |
 
@@ -151,9 +155,10 @@ claude plugin validate .
 ## Known limits
 
 - A very long inline formula is scaled down to fit the line.
-- Tables keep the app's own rendering, so math inside a table cell stays as source.
-- A paragraph with inline math loses Markdown links. Bold, italic and inline code are kept.
-- Markdown in your own message cannot render inside the app's bubble. Turn on the full rendered copy to see it under the bubble.
+- The desktop app drops a message's drawing once it passes about 250 KB, and says nothing. The mod stops at 235 KB, which is roughly 75 formulas in a reply that is mostly text, or 4 to 6 diagrams, and hands the rest of that reply to the app with a one-line note.
+- A table with math in it is laid out by the mod, with plain columns and no borders. A table without math keeps the app's own rendering.
+- A formula defined with `\newcommand` inside one formula does not reach the next. Put shared macros in the macros file.
+- A mod cannot draw inside the app's bubble for your own message, and cannot rewind or fork. The `rendered` setting works around this with a bubble of its own and the app's row kept under it.
 
 ## Develop
 

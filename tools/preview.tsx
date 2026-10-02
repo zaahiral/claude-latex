@@ -66,7 +66,7 @@ function treeFor(text: string): Node | null {
   const pieces = parse(text, { blocks: Boolean(bin) })
   if (!pieces.some(p => p.kind !== 'md')) return null
   return drawMessage(pieces, {
-    el: { Box: 'Box', Text: 'Text', Markdown: 'Markdown', Svg: 'Svg', Button: 'Button' } as never,
+    el: { Box: 'Box', Text: 'Text', Markdown: 'Markdown', Svg: 'Svg', Button: 'Button', Link: 'Link' } as never,
     formula: (tex, display) => {
       const svg = renderTex(tex, display)
       return svg ? withInk(svg, scheme) : null
@@ -104,6 +104,10 @@ function html(node: Child): string {
         p.alignItems ? `align-items:${p.alignItems}` : '',
         p.marginTop ? `margin-top:${unit(p.marginTop)}` : '',
         p.marginBottom ? `margin-bottom:${unit(p.marginBottom)}` : '',
+        p.justifyContent ? `justify-content:${p.justifyContent}` : '',
+        p.width ? `width:${p.width};box-sizing:border-box` : '',
+        p.paddingX ? `padding:0 ${unit(p.paddingX)}` : '',
+        p.backgroundColor ? `background:${p.backgroundColor}` : '',
       ].filter(Boolean).join(';')
       return `<div class="box" style="${style}">${kids}</div>`
     }
@@ -113,6 +117,8 @@ function html(node: Child): string {
         p.italic ? 'font-style:italic' : '',
         p.color ? `color:${p.color}` : '',
         p.dimColor ? 'opacity:.55' : '',
+        p.strikethrough ? 'text-decoration:line-through' : '',
+        p.backgroundColor ? `background:${p.backgroundColor};border-radius:3px;font-family:ui-monospace,monospace;font-size:.9em` : '',
       ].filter(Boolean).join(';')
       return `<span class="text" style="${style}">${kids}</span>`
     }
@@ -120,6 +126,8 @@ function html(node: Child): string {
       return `<div class="md">${marked.parse(String(p.text ?? ''))}</div>`
     case 'Svg':
       return `<img class="svg" alt="${esc(String(p.alt ?? ''))}" src="data:image/svg+xml;base64,${Buffer.from(String(p.source)).toString('base64')}">`
+    case 'Link':
+      return `<a href="${esc(String(p.href))}">${esc(String(p.label ?? p.href))}</a>`
     case 'Button':
       return `<button class="btn">${esc(String(p.label ?? ''))}</button>`
     default:

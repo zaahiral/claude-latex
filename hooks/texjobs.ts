@@ -44,6 +44,10 @@ export const BIN_CANDIDATES = [
 const mathQueue = new Map<string, MathJob>()
 const blockQueue = new Map<string, BlockJob>()
 const results = new Map<string, Rendered>()
+// Jobs a worker has taken and not finished. A message redrawn while its
+// block compiles asks for the block again: without this the same block
+// went to a second and a third worker.
+const inFlight = new Set<string>()
 
 // cyrb53: a fast 53-bit string hash, plenty to key a cache.
 export function hashOf(...parts: string[]): string {
@@ -66,14 +70,20 @@ export function resultOf(key: string): Rendered | undefined {
 
 export function setResult(key: string, result: Rendered): void {
   results.set(key, result)
+  inFlight.delete(key)
+}
+
+// Lets a job that was stopped from outside be asked for again.
+export function release(key: string): void {
+  inFlight.delete(key)
 }
 
 export function requestMath(job: MathJob): void {
-  if (!results.has(job.key)) mathQueue.set(job.key, job)
+  if (!results.has(job.key) && !inFlight.has(job.key)) mathQueue.set(job.key, job)
 }
 
 export function requestBlock(job: BlockJob): void {
-  if (!results.has(job.key)) blockQueue.set(job.key, job)
+  if (!results.has(job.key) && !inFlight.has(job.key)) blockQueue.set(job.key, job)
 }
 
 export function hasQueued(): boolean {
@@ -84,12 +94,16 @@ export function takeBlock(): BlockJob | undefined {
   const next = blockQueue.values().next()
   if (next.done) return undefined
   blockQueue.delete(next.value.key)
+  inFlight.add(next.value.key)
   return next.value
 }
 
 export function takeMathBatch(max: number): MathJob[] {
   const batch = [...mathQueue.values()].slice(0, max)
-  for (const job of batch) mathQueue.delete(job.key)
+  for (const job of batch) {
+    mathQueue.delete(job.key)
+    inFlight.add(job.key)
+  }
   return batch
 }
 

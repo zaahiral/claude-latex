@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 import { definePreamble, renderTex, withInk, type ColorScheme } from './math'
 import { drawMessage } from './draw'
-import { keepLineBreaks, looksLikeMath, mathOnly, parse } from './parse'
+import { keepLineBreaks, looksLikeMarkdown, looksLikeMath, mathOnly, parse } from './parse'
 import {
   BIN_CANDIDATES,
   documentForBlock,
@@ -12,6 +12,7 @@ import {
   hasQueued,
   isLatexFont,
   pageNumber,
+  release,
   requestBlock,
   requestMath,
   resultOf,
@@ -48,6 +49,34 @@ const PANE = 'latex-settings'
 // The user's own messages get Markdown. Notifications, agents and peers
 // keep the app's drawing.
 const OWN_MESSAGES = new Set(['composer', 'sdk', 'bridge', 'unclassified'])
+// How your own sent message is drawn. `off`, the default: as typed, in the
+// app's bubble. `under`: the app's bubble, with the math from the message
+// under it. `rendered`, experimental: in a bubble of the mod's, as Markdown
+// with its math.
+const BUBBLE_MODES = ['off', 'under', 'rendered'] as const
+type BubbleMode = (typeof BUBBLE_MODES)[number]
+// The bubble behind a rendered message of yours: a light gray that reads on
+// a light and on a dark theme.
+const USER_BUBBLE = '#8080801f'
+// What the model is told while the mod draws its replies: how to write math
+// so it renders, and where the limits are. One section of the system prompt.
+const MODEL_NOTE = `# Math rendering in this app (LaTeX mod)
+
+A mod draws TeX in your replies here. Write math as TeX, never as Unicode symbols in plain text.
+
+- Inline math: $...$ or \\(...\\). Display math: $$...$$, \\[...\\], or a bare equation, align, gather or multline environment.
+- MathJax draws it, with AMS, mathtools, mhchem (\\ce), physics (\\dv, \\qty), braket, cancel and color. A display formula MathJax cannot draw is typeset by the user's own LaTeX when they have one.
+- A \`\`\`tikz, \`\`\`tikzcd or \`\`\`latex code block is compiled by the user's LaTeX and shown as a drawing. To show LaTeX source as code, use \`\`\`tex.
+- A macro defined in one formula (\\newcommand, \\def) does not exist in the next formula. Define it again, or avoid it.
+- Size limit: one reply can hold about 235 KB of drawing. That is roughly 75 formulas in a reply that is mostly text, or 4 to 6 diagrams. Past the limit the rest of the reply is drawn by the app's plain renderer, which handles only simple formulas. Split longer material over several replies.
+- One drawing can be at most 128 KB. A dense plot or a very long formula over that shows an error in its place.
+- A display formula wider than the window is scaled down to fit. Break a long one over lines with aligned or split.
+- Dollar amounts such as $5 and $10 are left as text. Write \\$ where a dollar sign could be read as math.
+- The app may show text written between tool calls only as a short summary. Put math the user must see in the final message of a turn.`
+
+// What the app's own row says under a rendered message of yours. The row is
+// there for its controls.
+const CONTROLS_ROW_TEXT = '⋯'
 
 const FONT_CHOICES = ['mathjax', 'cm', 'libertinus', 'palatino', 'times', 'euler', 'concrete', 'fourier', 'stix2', 'kpfonts', 'cmbright']
 // Compiles run side by side, each in its own folder.
@@ -67,6 +96,12 @@ function describeFailure(error: unknown): Rendered {
 // The app's limit on one Svg element is 131072 characters. Leave room for
 // the color style withInk adds.
 const MAX_SVG_CHARS = 131072 - 400
+// How large one message's drawing may be. The desktop app showed a drawing
+// of about 248,000 characters and dropped the next one, about 257,000,
+// without a word: it kept showing the older drawing, with the end of the
+// message missing. Past this size the mod hands the rest of the message to
+// the app's own Markdown.
+const MAX_MESSAGE_CHARS = 235_000
 
 // Where latex and dvisvgm live, and where compiled SVGs are kept.
 let tex: { bin: string; cacheDir: string } | null = null
@@ -77,6 +112,7 @@ let debugDir = ''
 
 function debug($: Engine, line: string): void {
   debugLines.push(`${new Date().toISOString()} ${line}`)
+  if (debugLines.length > 600) debugLines.splice(0, debugLines.length - 600)
   if (debugDir) void $.fs.write(`${debugDir}/setup.log`, debugLines.join('\n') + '\n').catch(() => undefined)
 }
 
@@ -127,10 +163,14 @@ function startWorkers($: Engine, latexFont: LatexFont | null): void {
       void (async () => {
         if (block) {
           const font = latexFont ?? 'cm'
+          const compileStarted = Date.now()
           const result = await compileBlock($, block, font).catch(describeFailure)
           const tries = retries.get(block.key) ?? 0
+          const outcome = 'svg' in result ? `${result.svg.length} chars` : `error${result.interrupted ? ' (interrupted)' : ''}: ${result.error.split('\n')[0]}`
+          debug($, `compiled ${block.lang} ${block.key}, try ${tries + 1}: ${outcome}, ${Date.now() - compileStarted} ms | ${JSON.stringify(block.source.slice(0, 40))}`)
           if ('error' in result && result.interrupted && tries < MAX_RETRIES) {
             retries.set(block.key, tries + 1)
+            release(block.key)
             requestBlock(block)
           } else {
             setResult(block.key, result)
@@ -360,9 +400,9 @@ export const register: Register = (on, options) => {
   const fontOption = String(options.mathFont ?? 'mathjax')
   const latexFont: LatexFont | null = isLatexFont(fontOption) ? fontOption : null
   const blocksOn = options.tikz !== false
-  const renderUser = options.userMessages !== false
-  const userMarkdown = options.userMarkdown !== false
+  const bubbleMode: BubbleMode = BUBBLE_MODES.find(mode => mode === options.userBubble) ?? 'off'
   const showCopy = options.copyButton === true
+  const tellModel = options.tellModel !== false
   // The settings rows, by field: `latex.mathFont`, or `latex@inline.mathFont`
   // for a plugin loaded from a folder. Filled at session start.
   const configKeys = new Map<string, string>()
@@ -443,6 +483,16 @@ export const register: Register = (on, options) => {
     return done
   })
 
+  // The model cannot see how its reply is drawn. Where the mod draws, it adds
+  // one section to the system prompt saying how math renders and what the
+  // limits are.
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    const drawsHere = e.surfaces.some(surface => surface === 'desktop' || surface === 'mobile')
+    if (!tellModel || !drawsHere) return composed
+    return { sections: [...composed.sections, { id: 'latex:rendering', text: MODEL_NOTE, scope: 'session' as const }] }
+  })
+
   on('command.run', { command: 'latex' }, async $ => {
     await $.ui.open({ id: PANE, title: 'LaTeX settings' })
     return { text: 'Opened the LaTeX settings.' }
@@ -455,43 +505,90 @@ export const register: Register = (on, options) => {
     const isUser = e.component === 'UserMessage'
     if (isUser && (e.props.task || e.props.from || !OWN_MESSAGES.has(e.props.origin.kind))) return next(e)
     const text = isUser ? keepLineBreaks(e.props.text) : e.props.text
-    const { Box, Markdown: MarkdownElement } = $.ui.resolve(e)
-    // Your own message keeps the app's own bubble, with its copy button and
-    // the rest. The mod adds the rendered math under it: just the math by
-    // default, or a full rendered copy when that setting is on.
-    const native = isUser ? await next(e) : null
-    const mode = !isUser ? 'reply' : userMarkdown ? 'full' : renderUser ? 'math' : 'none'
-    const underBubble = (tree: ReturnType<typeof drawMessage>) => (
+    const { Box, Text, Markdown, Svg, Button, Link } = $.ui.resolve(e)
+    const mode = !isUser ? 'reply' : bubbleMode
+    if (mode === 'off') return next(e)
+    // Before TeX is found, blocks are left as code. Listen for the redraw
+    // that follows TeX setup.
+    if (blocksOn && tex === null && /```\s*(tikz|latex)/.test(text)) await read($, version)
+    const hasMath = looksLikeMath(text)
+    // A message of yours with nothing to render keeps the app's own bubble.
+    if (!hasMath && !(mode === 'rendered' && looksLikeMarkdown(text))) return next(e)
+    let pieces = parse(text, { blocks: blocksOn && tex !== null })
+    if (mode === 'under') pieces = mathOnly(pieces)
+    // A display formula MathJax cannot draw goes to LaTeX. Before TeX is
+    // found it is drawn as source: listen for the redraw that follows setup.
+    if (blocksOn && tex === null && pieces.some(p => p.kind === 'display' && renderTex(p.tex, true) === null)) await read($, version)
+    // Dollars that turned out not to be math leave nothing to draw.
+    if (!pieces.some(p => p.kind !== 'md') && !(mode === 'rendered' && looksLikeMarkdown(text))) return next(e)
+
+    // The app's bubble cannot be drawn into: it reaches a mod as a closed
+    // handle. So a rendered message of yours is drawn in a bubble of the
+    // mod's own, on the right, with a Copy button that appears under it on
+    // hover and copies the message as you typed it.
+    const inBubble = (tree: ReturnType<typeof drawMessage>) => (
+      <Box key={`you-${hashOf(e.props.text)}`} flexDirection="column" alignItems="flex-end">
+        <Box flexDirection="column" flexShrink={1} marginLeft={6} backgroundColor={USER_BUBBLE} borderStyle="round" borderColor={USER_BUBBLE} paddingX={1}>
+          {tree}
+        </Box>
+        <Box flexDirection="row" height={1}>
+          <Box flexDirection="row" display="none" hover={{ display: 'flex' }}>
+            <Button
+              key="copy-message"
+              label="Copy"
+              plain
+              dimColor
+              onPress={press => {
+                void $.ui.copy({ text: e.props.text, surface: press.surface }).then(r => {
+                  if (r.isCopied) $.ui.toast('Message copied')
+                })
+              }}
+            />
+          </Box>
+        </Box>
+      </Box>
+    )
+    // `under` keeps the app's bubble and adds the math below it.
+    const underBubble = async (tree: ReturnType<typeof drawMessage>) => (
       <Box flexDirection="column">
-        {native}
+        {await next(e)}
         <Box flexDirection="column" marginTop={1}>
           {tree}
         </Box>
       </Box>
     )
-    if (mode === 'none') return native ?? next(e)
-    // Before TeX is found, blocks are left as code. Listen for the redraw
-    // that follows TeX setup.
-    if (blocksOn && tex === null && /```\s*(tikz|latex)/.test(text)) await read($, version)
-    if (!looksLikeMath(text)) {
-      if (mode === 'full') return underBubble(<MarkdownElement text={text} />)
-      return native ?? next(e)
-    }
-    let pieces = parse(text, { blocks: blocksOn && tex !== null })
-    if (mode === 'math') pieces = mathOnly(pieces)
-    if (!pieces.some(p => p.kind !== 'md')) {
-      if (mode === 'full') return underBubble(<MarkdownElement text={text} />)
-      return native ?? next(e)
-    }
 
-    const { Text, Markdown, Svg, Button } = $.ui.resolve(e)
     const useLatex = latexFont !== null && tex !== null
     let isWaiting = false
+    // What this drawing hands the app, for the debug log.
+    const handed = { svgs: 0, svgChars: 0 }
+    let size: { chars: number; handedBackAt: number | null } = { chars: 0, handedBackAt: null }
+    const count = (svg: string) => {
+      handed.svgs += 1
+      handed.svgChars += svg.length
+      return svg
+    }
+    // A display formula MathJax cannot draw is typeset by the local LaTeX,
+    // as a LaTeX block would be.
+    const canFallBack = blocksOn && tex !== null
+    const fallbackBlock = (p: { source: string }) => ({ lang: 'latex' as const, source: p.source })
+    const blockKey = (p: { lang: BlockJob['lang']; source: string }) => hashOf('block', latexFont ?? 'cm', p.lang, macros, p.source)
+    const compiled = (p: { lang: BlockJob['lang']; source: string }) => {
+      const key = blockKey(p)
+      const result = resultOf(key)
+      if (!result) {
+        requestBlock({ key, lang: p.lang, source: p.source })
+        isWaiting = true
+        return undefined
+      }
+      return 'svg' in result ? { svg: count(withInk(result.svg, scheme)) } : result
+    }
 
     // Fill the in-memory results from the disk cache before drawing.
     for (const p of pieces) {
-      if (p.kind === 'block') {
-        const key = hashOf('block', latexFont ?? 'cm', p.lang, macros, p.source)
+      const asBlock = p.kind === 'block' ? p : p.kind === 'display' && canFallBack && renderTex(p.tex, true) === null ? fallbackBlock(p) : null
+      if (asBlock) {
+        const key = blockKey(asBlock)
         if (!resultOf(key)) await fromDisk($, `b-${key}.svg`, key)
       }
       if (useLatex && (p.kind === 'display' || p.kind === 'inline')) {
@@ -507,30 +604,26 @@ export const register: Register = (on, options) => {
     }
 
     const tree = drawMessage(pieces, {
-      el: { Box, Text, Markdown, Svg, Button },
+      el: { Box, Text, Markdown, Svg, Button, Link },
       formula: (source, display) => {
         if (useLatex) {
           const key = hashOf('math', latexFont, display ? 'D' : 'I', macros, source)
           const typeset = resultOf(key)
-          if (typeset && 'svg' in typeset) return withInk(typeset.svg, scheme)
+          if (typeset && 'svg' in typeset) return count(withInk(typeset.svg, scheme))
           if (!typeset) {
             requestMath({ key, tex: source, display })
             isWaiting = true
           }
         }
         const svg = renderTex(source, display)
-        return svg ? withInk(svg, scheme) : null
+        return svg ? count(withInk(svg, scheme)) : null
       },
-      block: p => {
-        const key = hashOf('block', latexFont ?? 'cm', p.lang, macros, p.source)
-        const result = resultOf(key)
-        if (!result) {
-          requestBlock({ key, lang: p.lang, source: p.source })
-          isWaiting = true
-          return undefined
-        }
-        return 'svg' in result ? { svg: withInk(result.svg, scheme) } : result
+      block: compiled,
+      maxChars: MAX_MESSAGE_CHARS,
+      onDrawn: drawn => {
+        size = drawn
       },
+      fallback: p => (canFallBack ? compiled(fallbackBlock(p)) : null),
       showCopy,
       onCopy: (text, press) => {
         void $.ui.copy({ text, surface: press.surface }).then(r => {
@@ -541,7 +634,23 @@ export const register: Register = (on, options) => {
     // Only a message still waiting on a compile listens for finished
     // compiles. A finished message is never redrawn by them.
     if (isWaiting) await read($, version)
-    return isUser ? underBubble(tree) : tree
+    const kinds = pieces.map(p => p.kind[0]).join('')
+    debug($, `drew ${e.component} ${e.props.text.length} chars as ${mode}: pieces ${kinds}, ${handed.svgs} svgs of ${handed.svgChars} chars, drawing ${size.chars} chars${size.handedBackAt === null ? '' : ` then handed back from piece ${size.handedBackAt}`}, ${Date.now() - renderStarted} ms${isWaiting ? ', waiting on LaTeX' : ''} | ${JSON.stringify(e.props.text.slice(0, 40))}`)
+    if (mode === 'rendered') {
+      // The time, copy, rewind and fork controls are the app's, and come only
+      // with the app's own row. So that row is kept under the rendered
+      // bubble with its text replaced by an ellipsis: a small pill whose
+      // controls show on hover. It must be asked for once: the app drew
+      // nothing when one drawing held several of its rows.
+      const controls = await next({ ...e, props: { ...e.props, text: CONTROLS_ROW_TEXT } }).catch(() => null)
+      return (
+        <Box flexDirection="column">
+          {inBubble(tree)}
+          {controls}
+        </Box>
+      )
+    }
+    return mode === 'under' ? await underBubble(tree) : tree
     } catch (error) {
       // Never leave a message undrawn: fall back to the app's own drawing.
       debug($, `render error (${e.component}, ${e.props.text.length} chars): ${String(error)}`)
@@ -550,6 +659,11 @@ export const register: Register = (on, options) => {
       const ms = Date.now() - renderStarted
       if (ms > 150) debug($, `slow render ${ms} ms (${e.component}, ${e.props.text.length} chars)`)
     }
+  }).catch(async ($, e, next) => {
+    // The engine refused the drawing, or the hook overran. Write down why,
+    // and let the app draw the message itself.
+    debug($, `REFUSED ${e.component} ${e.props.text.length} chars: ${next.error.kind} ${next.error.message ?? ''} | ${JSON.stringify(e.props.text.slice(0, 40))}`)
+    return next(e)
   })
 
   // A one-time band above the prompt: what the mod does, where its settings are.
@@ -564,7 +678,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         <Text bold>LaTeX mod is on</Text>
         <Text dimColor>
-          Math, TikZ and LaTeX blocks in replies now render, and the math in your own messages shows under them. You can pick one of 10 math fonts and show a Copy TeX button.
+          Math, TikZ and LaTeX blocks in replies now render. You can pick one of 10 math fonts, and choose whether your own messages show their math.
         </Text>
         <Box flexDirection="row" gap={1}>
           <Button
@@ -633,8 +747,25 @@ export const register: Register = (on, options) => {
             <Text>{colorValue}</Text>
           )}
         </Box>
-        {toggle('userMarkdown', 'Full rendered copy of your messages', 'Under your message bubble, the whole message rendered: Markdown and math.', userMarkdown)}
-        {toggle('userMessages', 'Math under your messages', 'Under your message bubble, the math and diagrams from it, rendered.', renderUser)}
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>Your messages</Text>
+          {Select ? (
+            <Select
+              key="user-bubble"
+              value={bubbleMode}
+              options={[
+                { value: 'off', label: 'As typed' },
+                { value: 'under', label: 'As typed, with the math under the bubble' },
+                { value: 'rendered', label: 'Rendered: Markdown and math in a bubble (experimental)' },
+              ]}
+              onSelect={(value: string) => set('userBubble', value)}
+            />
+          ) : (
+            <Text>{bubbleMode}</Text>
+          )}
+          <Text dimColor>How a message you sent is drawn. Rendered draws its own bubble and keeps the app's row under it as a small pill, for the time, rewind and fork controls.</Text>
+        </Box>
+        {toggle('tellModel', 'Tell the model how math renders here', 'Adds a short note to the system prompt: the syntax that renders, and the size limits.', tellModel)}
         {toggle('copyButton', 'Copy TeX button', 'A button under each display formula and LaTeX block.', showCopy)}
         {toggle('tikz', 'Compile LaTeX blocks', 'tikz, tikzcd and latex code blocks, using your TeX install.', blocksOn)}
         <Text dimColor>Macros file: {String(options.macrosFile || '~/.claude/latex-macros.tex')}. Reopen this pane with /latex.</Text>

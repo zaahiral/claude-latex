@@ -1,7 +1,7 @@
 {
   "name": "latex",
   "displayName": "LaTeX",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Render TeX math, TikZ diagrams and LaTeX blocks in Claude Code's desktop app, in any of 10 LaTeX fonts, with every LaTeX compile sandboxed",
   "author": {
     "name": "Zaahir Ali"
@@ -52,16 +52,21 @@
       "description": "Compile ```tikz, ```tikzcd and ```latex code blocks with your local TeX install (latex and dvisvgm).",
       "default": true
     },
-    "userMarkdown": {
-      "type": "boolean",
-      "title": "Full rendered copy of your messages",
-      "description": "Under your message bubble, show the whole message rendered: Markdown and math. Off by default, since it repeats your text.",
-      "default": false
+    "userBubble": {
+      "type": "string",
+      "title": "Your messages",
+      "description": "off leaves your messages as typed. under keeps the app's bubble and shows the math from your message below it. rendered is experimental: it draws your message as Markdown with its math in a bubble of the mod's, and keeps the app's row under it as a small pill for the time, rewind and fork controls.",
+      "default": "off",
+      "options": [
+        "off",
+        "under",
+        "rendered"
+      ]
     },
-    "userMessages": {
+    "tellModel": {
       "type": "boolean",
-      "title": "Math under your messages",
-      "description": "Under your message bubble, show the math and diagrams from your message, rendered.",
+      "title": "Tell the model how math renders here",
+      "description": "Add a short note to the system prompt, where the mod draws: the syntax that renders, what a code block compiles, and the size limits of one reply.",
       "default": true
     },
     "copyButton": {
