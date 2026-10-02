@@ -2,7 +2,7 @@
   "name": "latex",
   "displayName": "LaTeX",
   "version": "0.3.0",
-  "description": "Render TeX maths, TikZ diagrams and LaTeX blocks in Claude's replies in the Claude Code desktop app, in any of 10 LaTeX fonts",
+  "description": "Render TeX math, TikZ diagrams and LaTeX blocks in Claude's replies in the Claude Code desktop app, in any of 10 LaTeX fonts",
   "author": {
     "name": "Zaahir Ali"
   },
@@ -18,7 +18,7 @@
   "userConfig": {
     "mathFont": {
       "type": "string",
-      "title": "Maths font",
+      "title": "Math font",
       "description": "mathjax draws instantly in Computer Modern. Any other choice typesets every formula with your local LaTeX in that font, showing MathJax until it is ready.",
       "default": "mathjax",
       "options": [
@@ -37,7 +37,7 @@
     },
     "colorScheme": {
       "type": "string",
-      "title": "Maths colour",
+      "title": "Math color",
       "description": "auto follows the system light or dark setting. Pick light or dark if the app's theme differs from the system's.",
       "default": "auto",
       "options": [
@@ -54,8 +54,8 @@
     },
     "userMessages": {
       "type": "boolean",
-      "title": "Render maths in your messages",
-      "description": "Also render maths in the messages you send.",
+      "title": "Render math in your messages",
+      "description": "Also render math in the messages you send.",
       "default": true
     },
     "macrosFile": {

@@ -28,7 +28,7 @@ import {
 } from './texjobs'
 
 // Draws messages in the desktop Code tab with TeX rendered.
-// $$...$$, \[...\] and equation/align environments become centred SVG blocks
+// $$...$$, \[...\] and equation/align environments become centered SVG blocks
 // with a Copy TeX button. A paragraph with $...$ or \(...\) is laid out word
 // by word, each formula an inline SVG sitting on the text's baseline.
 // MathJax draws every formula at once. With a LaTeX font chosen, the local
@@ -36,11 +36,14 @@ import {
 // ```tikz, ```tikzcd and ```latex blocks are compiled with the local TeX.
 // Everything else stays the app's own Markdown.
 
-// Goes up each time a compile finishes. Every message that draws maths
+// Goes up each time a compile finishes. Every message that draws math
 // reads it, so writing it redraws exactly those messages.
 const version = atom({ plugin: 'latex', key: 'version' } as const, 0)
 // Compiles run side by side, each in its own folder.
 const MAX_WORKERS = 3
+// The app's limit on one Svg element is 131072 characters. Leave room for
+// the color style withInk adds.
+const MAX_SVG_CHARS = 131072 - 400
 
 // Where latex and dvisvgm live, and where compiled SVGs are kept.
 let tex: { bin: string; cacheDir: string } | null = null
@@ -121,7 +124,7 @@ async function runTex($: Engine, dir: string, doc: TexDoc, dvisvgmArgs: string[]
       if (run.exitCode === 0) brokenFormats.add(formatName(doc))
     }
     if (run.exitCode !== 0) return { error: texError(run.stdout) }
-    const dvisvgm = await $.process.run([`${bin}/dvisvgm`, '--no-fonts', ...dvisvgmArgs, 'd.dvi'], {
+    const dvisvgm = await $.process.run([`${bin}/dvisvgm`, '--no-fonts', '--precision=2', ...dvisvgmArgs, 'd.dvi'], {
       cwd: dir,
       timeoutMs: 60000,
     })
@@ -150,6 +153,11 @@ async function compileBlock($: Engine, job: BlockJob, font: LatexFont): Promise<
   if (!Array.isArray(out)) return out
   const svg = out[0]
   if (!svg) return { error: 'dvisvgm wrote no page.' }
+  // The app refuses an SVG over 131072 characters, and refusing one refuses
+  // the whole message's drawing. Report it on this block instead.
+  if (svg.length > MAX_SVG_CHARS) {
+    return { error: `This drawing is ${Math.round(svg.length / 1024)} KB of SVG. The app draws at most 128 KB.` }
+  }
   await $.fs.write(cached, svg)
   return { svg }
 }
@@ -224,7 +232,7 @@ export const register: Register = (on, options) => {
     if (blocksOn || latexFont) {
       const path = (await $.env.get('PATH').catch(() => undefined)) ?? ''
       const ready = await findTex($, home, path).catch(() => false)
-      if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so maths uses MathJax')
+      if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so math uses MathJax')
       if (ready) {
         // Build the common formats now, in the background, so the first
         // diagram does not wait for them.

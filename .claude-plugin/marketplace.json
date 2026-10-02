@@ -8,7 +8,7 @@
     {
       "name": "latex",
       "source": "./",
-      "description": "Render TeX maths, TikZ diagrams and LaTeX blocks in Claude's replies in the Claude Code desktop app, in any of 10 LaTeX fonts"
+      "description": "Render TeX math, TikZ diagrams and LaTeX blocks in Claude's replies in the Claude Code desktop app, in any of 10 LaTeX fonts"
     }
   ]
 }

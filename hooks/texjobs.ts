@@ -106,8 +106,8 @@ export function fullDocument(doc: TexDoc): string {
 }
 
 // Each formula is one page. An inline formula's box is padded so its
-// baseline sits 0.75ex below the box's vertical centre, the same rule the
-// MathJax path uses, so a row of words and formulas centred on that line
+// baseline sits 0.75ex below the box's vertical center, the same rule the
+// MathJax path uses, so a row of words and formulas centered on that line
 // keeps every baseline level.
 export function documentForMath(jobs: MathJob[], font: LatexFont, macros: string): TexDoc {
   const base = [
@@ -184,7 +184,7 @@ export function texError(log: string): string {
   return lines.slice(at, at + 4).join('\n').trim()
 }
 
-// Black ink follows the theme. Other colours stay as written.
+// Black ink follows the theme. Other colors stay as written.
 export function themeInk(svg: string): string {
   return svg
     .replace(/^[\s\S]*?(<svg)/, '$1')

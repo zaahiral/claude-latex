@@ -11,7 +11,7 @@ const SAMPLE = [
 
 const reply = (text: string) => ({ text, isFirstOfReply: true })
 
-test('draws inline and display maths as SVG on the desktop', async $ => {
+test('draws inline and display math as SVG on the desktop', async $ => {
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(SAMPLE) })
   const svgs = await ui.findAll({ type: 'Svg' })
   expect(svgs).toHaveLength(2)
@@ -31,7 +31,7 @@ test('leaves dollar amounts to the app', async ($, on) => {
   await ui.unmount()
 })
 
-test('keeps maths inside code blocks as code', async $ => {
+test('keeps math inside code blocks as code', async $ => {
   const text = 'Run this:\n\n```bash\necho "$HOME and $PATH"\n```\n\nThen $x^2$.'
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
@@ -45,7 +45,7 @@ test('shows a bad formula as red source', async $ => {
   await ui.unmount()
 })
 
-test('renders maths in the messages you send', async $ => {
+test('renders math in the messages you send', async $ => {
   const ui = await $.ui.mount({
     plugin: 'latex',
     surface: 'desktop',
@@ -56,14 +56,14 @@ test('renders maths in the messages you send', async $ => {
   await ui.unmount()
 })
 
-test('lays out lists with inline maths', async $ => {
+test('lays out lists with inline math', async $ => {
   const text = '- first $a_1$\n- second $a_2$\n1. third $a_3$'
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(3)
   await ui.unmount()
 })
 
-test('maps \\bm to bold maths', async $ => {
+test('maps \\bm to bold math', async $ => {
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply('A vector $\\bm{x} \\in \\mathbb{R}^n$.') })
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
   await ui.unmount()
