@@ -1,3 +1,4 @@
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
 import { definePreamble, renderTex, withInk, type ColorScheme } from './math'
 import { looksLikeMath, NBSP, parse, type Line } from './parse'
@@ -32,6 +33,12 @@ import {
 // ```tikz, ```tikzcd and ```latex blocks are compiled with the local TeX.
 // Everything else stays the app's own Markdown.
 
+// Goes up each time a compile finishes. Every message that draws maths
+// reads it, so writing it redraws exactly those messages.
+const version = atom({ plugin: 'latex', key: 'version' } as const, 0)
+// Compiles run side by side, each in its own folder.
+const MAX_WORKERS = 3
+
 // Where latex and dvisvgm live, and where compiled SVGs are kept.
 let tex: { bin: string; cacheDir: string } | null = null
 let macros = ''
@@ -49,40 +56,38 @@ async function findTex($: Engine, home: string, path: string): Promise<boolean> 
   return false
 }
 
-// Runs latex then dvisvgm in `dir` on `source`. Returns the SVG pages in
-// order, or the LaTeX error.
+// Runs latex then dvisvgm in a fresh folder `dir`, then removes it.
+// Returns the SVG pages in order, or the LaTeX error.
 async function runTex($: Engine, dir: string, source: string, dvisvgmArgs: string[]): Promise<string[] | { error: string }> {
   const { bin } = tex!
-  await $.fs.write(`${dir}/d.tex`, source)
-  for (const entry of await $.fs.list(dir)) {
-    if (pageNumber(entry.name) !== undefined || entry.name === 'd.svg') await $.fs.write(`${dir}/${entry.name}`, '')
+  try {
+    await $.fs.write(`${dir}/d.tex`, source)
+    const latex = await $.process.run(
+      [`${bin}/latex`, '-no-shell-escape', '-interaction=nonstopmode', '-halt-on-error', 'd.tex'],
+      { cwd: dir, timeoutMs: 60000 },
+    )
+    if (latex.exitCode !== 0) return { error: texError(latex.stdout) }
+    const dvisvgm = await $.process.run([`${bin}/dvisvgm`, '--no-fonts', ...dvisvgmArgs, 'd.dvi'], {
+      cwd: dir,
+      timeoutMs: 60000,
+    })
+    if (dvisvgm.exitCode !== 0) return { error: dvisvgm.stderr.trim().split('\n').slice(-3).join('\n') }
+    const pages = (await $.fs.list(dir))
+      .map(entry => ({ name: entry.name, page: entry.name === 'd.svg' ? 1 : pageNumber(entry.name) }))
+      .filter((p): p is { name: string; page: number } => p.page !== undefined)
+      .sort((a, b) => a.page - b.page)
+    const svgs: string[] = []
+    for (const p of pages) svgs.push(themeInk(await $.fs.read(`${dir}/${p.name}`)))
+    return svgs
+  } finally {
+    await $.process.run(['/bin/rm', '-rf', dir]).catch(() => undefined)
   }
-  const latex = await $.process.run(
-    [`${bin}/latex`, '-no-shell-escape', '-interaction=nonstopmode', '-halt-on-error', 'd.tex'],
-    { cwd: dir, timeoutMs: 60000 },
-  )
-  if (latex.exitCode !== 0) return { error: texError(latex.stdout) }
-  const dvisvgm = await $.process.run([`${bin}/dvisvgm`, '--no-fonts', ...dvisvgmArgs, 'd.dvi'], {
-    cwd: dir,
-    timeoutMs: 60000,
-  })
-  if (dvisvgm.exitCode !== 0) return { error: dvisvgm.stderr.trim().split('\n').slice(-3).join('\n') }
-  const pages = (await $.fs.list(dir))
-    .map(entry => ({ name: entry.name, page: entry.name === 'd.svg' ? 1 : pageNumber(entry.name) }))
-    .filter((p): p is { name: string; page: number } => p.page !== undefined)
-    .sort((a, b) => a.page - b.page)
-  const svgs: string[] = []
-  for (const p of pages) {
-    const svg = await $.fs.read(`${dir}/${p.name}`)
-    if (svg.trim()) svgs.push(themeInk(svg))
-  }
-  return svgs
 }
 
 async function compileBlock($: Engine, job: BlockJob, font: LatexFont): Promise<Rendered> {
   const cached = `${tex!.cacheDir}/b-${job.key}.svg`
   if (await $.fs.exists(cached)) return { svg: await $.fs.read(cached) }
-  const out = await runTex($, `${tex!.cacheDir}/build/block`, documentForBlock(job, font, macros), [
+  const out = await runTex($, `${tex!.cacheDir}/build/b-${job.key}`, documentForBlock(job, font, macros), [
     '--exact-bbox',
     '--zoom=1.3',
     '-o',
@@ -105,7 +110,8 @@ async function compileMath($: Engine, jobs: MathJob[], font: LatexFont): Promise
     else todo.push(job)
   }
   if (todo.length === 0) return
-  const out = await runTex($, `${tex!.cacheDir}/build/math`, documentForMath(todo, font, macros), [
+  const batchDir = `${tex!.cacheDir}/build/m-${hashOf(...todo.map(job => job.key))}`
+  const out = await runTex($, batchDir, documentForMath(todo, font, macros), [
     '--bbox=papersize',
     '--zoom=1.2',
     '-p',
@@ -153,24 +159,29 @@ export const register: Register = (on, options) => {
       const ready = await findTex($, home, path).catch(() => false)
       if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so maths uses MathJax')
       if (ready) {
-        let busy = false
-        $.clock.every(150, () => {
-          if (busy || !hasQueued()) return
-          busy = true
-          void (async () => {
+        let running = 0
+        $.clock.every(100, () => {
+          while (running < MAX_WORKERS && hasQueued()) {
             const block = takeBlock()
-            if (block) {
-              setResult(block.key, await compileBlock($, block, latexFont ?? 'cm').catch(error => ({ error: String(error) })))
-            } else if (latexFont) {
-              const batch = takeMathBatch(60)
-              await compileMath($, batch, latexFont).catch(() => {
-                for (const job of batch) setResult(job.key, { error: 'compile failed' })
+            const batch = block || !latexFont ? [] : takeMathBatch(60)
+            if (!block && batch.length === 0) break
+            running += 1
+            void (async () => {
+              if (block) {
+                const font = latexFont ?? 'cm'
+                setResult(block.key, await compileBlock($, block, font).catch(error => ({ error: String(error) })))
+              } else if (latexFont) {
+                await compileMath($, batch, latexFont).catch(() => {
+                  for (const job of batch) setResult(job.key, { error: 'compile failed' })
+                })
+              }
+              await update($, version, n => n + 1)
+            })()
+              .catch(() => undefined)
+              .finally(() => {
+                running -= 1
               })
-            }
-            $.ui.invalidate('ui.render')
-          })().finally(() => {
-            busy = false
-          })
+          }
         })
       }
     }
@@ -183,6 +194,9 @@ export const register: Register = (on, options) => {
     if (!looksLikeMath(e.props.text)) return next(e)
     const pieces = parse(e.props.text, { blocks: blocksOn && tex !== null })
     if (!pieces.some(p => p.kind !== 'md')) return next(e)
+
+    // Subscribe this message to finished compiles.
+    await read($, version)
 
     const { Box, Text, Markdown, Svg, Button } = $.ui.resolve(e)
     const useLatex = latexFont !== null && tex !== null

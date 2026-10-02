@@ -66,5 +66,6 @@
     }
   },
   "homepage": "https://github.com/zaahiral/claude-latex",
-  "repository": "https://github.com/zaahiral/claude-latex"
+  "repository": "https://github.com/zaahiral/claude-latex",
+  "types": "./types/index.d.ts"
 }
