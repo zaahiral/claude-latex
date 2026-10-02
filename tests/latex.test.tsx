@@ -101,6 +101,16 @@ function fakeTex(on: On, pages = 1) {
   on('process.run', async ($, e) => {
     runs.push([...e.argv])
     const cwd = e.init?.cwd ?? ''
+    if (e.argv.includes('-ini')) {
+      const job = e.argv.find(a => a.startsWith('-jobname='))?.slice('-jobname='.length)
+      files.set(`${cwd}/${job}.fmt`, 'format')
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (e.argv[0] === '/bin/mv') {
+      const [from, to] = [e.argv[1] ?? '', e.argv[2] ?? '']
+      files.set(to, files.get(from) ?? '')
+      files.delete(from)
+    }
     if (e.argv[0]?.endsWith('/latex')) files.set(`${cwd}/d.dvi`, 'dvi')
     if (e.argv[0]?.endsWith('/dvisvgm')) {
       if (e.argv.includes('d.svg')) files.set(`${cwd}/d.svg`, "<svg width='10pt' height='5pt'><path d=''/></svg>")
@@ -122,6 +132,9 @@ test('a LaTeX block redraws by itself once compiled', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /Compiling with LaTeX/ })).toBeDefined()
   for (let i = 0; i < 3; i++) await clock.advance(100)
   expect(runs.some(argv => argv[0]?.endsWith('/latex'))).toBe(true)
+  // The compile used a saved format, built once in the background.
+  expect(runs.some(argv => argv.includes('-ini'))).toBe(true)
+  expect(runs.some(argv => argv.some(a => a.startsWith('-fmt=')))).toBe(true)
   expect(await ui.find({ type: 'Text', text: /Compiling with LaTeX/ })).toBeUndefined()
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
   await ui.unmount()
@@ -136,7 +149,7 @@ test('compiles blocks side by side, each in its own folder', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
   await clock.advance(100)
   await clock.advance(100)
-  const latexRuns = runs.filter(argv => argv[0]?.endsWith('/latex'))
+  const latexRuns = runs.filter(argv => argv[0]?.endsWith('/latex') && !argv.includes('-ini'))
   expect(latexRuns).toHaveLength(3)
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(3)
   await ui.unmount()
@@ -153,7 +166,7 @@ test('with a LaTeX font, typesets a message in one run and swaps it in', { optio
   expect(String(before[0]?.props.source)).toContain('viewBox')
   await clock.advance(100)
   await clock.advance(100)
-  expect(runs.filter(argv => argv[0]?.endsWith('/latex'))).toHaveLength(1)
+  expect(runs.filter(argv => argv[0]?.endsWith('/latex') && !argv.includes('-ini'))).toHaveLength(1)
   const source = [...files.entries()].find(([p]) => p.endsWith('.svg') && p.includes('/m-'))
   expect(source).toBeDefined()
   const after = await ui.findAll({ type: 'Svg' })

@@ -6,6 +6,7 @@ import {
   BIN_CANDIDATES,
   documentForBlock,
   documentForMath,
+  fullDocument,
   hashOf,
   hasQueued,
   isLatexFont,
@@ -22,6 +23,7 @@ import {
   type LatexFont,
   type MathJob,
   type Rendered,
+  type TexDoc,
 } from './texjobs'
 
 // Draws messages in the desktop Code tab with TeX rendered.
@@ -56,17 +58,68 @@ async function findTex($: Engine, home: string, path: string): Promise<boolean> 
   return false
 }
 
+// Saved LaTeX formats: the class and fixed preamble of one kind of document,
+// loaded once and dumped, so each compile skips loading TikZ, pgfplots and
+// the font packages. About halves LaTeX time. Built once per machine and
+// kept in the cache folder. A format that ever fails is not used again this
+// session, and the compile falls back to the whole document.
+const formats = new Map<string, Promise<string | null>>()
+const brokenFormats = new Set<string>()
+
+async function buildFormat($: Engine, name: string, base: string): Promise<string | null> {
+  const dir = `${tex!.cacheDir}/formats`
+  const path = `${dir}/${name}`
+  if (await $.fs.exists(`${path}.fmt`)) return path
+  // Build under a temporary name, then move it into place, so a session that
+  // looks while another builds never reads half a format.
+  const temp = `${name}-${Math.random().toString(36).slice(2, 8)}`
+  await $.fs.write(`${dir}/${temp}.tex`, `${base}\n\\dump\n`)
+  await $.process.run([`${tex!.bin}/latex`, '-ini', '-interaction=nonstopmode', `-jobname=${temp}`, '&latex', `${temp}.tex`], {
+    cwd: dir,
+    timeoutMs: 120000,
+  })
+  if (!(await $.fs.exists(`${dir}/${temp}.fmt`))) return null
+  await $.process.run(['/bin/mv', `${dir}/${temp}.fmt`, `${path}.fmt`])
+  await $.process.run(['/bin/rm', '-f', `${dir}/${temp}.tex`, `${dir}/${temp}.log`]).catch(() => undefined)
+  return (await $.fs.exists(`${path}.fmt`)) ? path : null
+}
+
+function formatName(doc: TexDoc): string {
+  return `fmt-${doc.kind}-${hashOf(doc.base)}`
+}
+
+function formatFor($: Engine, doc: TexDoc): Promise<string | null> {
+  const name = formatName(doc)
+  if (brokenFormats.has(name)) return Promise.resolve(null)
+  let pending = formats.get(name)
+  if (!pending) {
+    pending = buildFormat($, name, doc.base).catch(() => null)
+    formats.set(name, pending)
+  }
+  return pending
+}
+
 // Runs latex then dvisvgm in a fresh folder `dir`, then removes it.
 // Returns the SVG pages in order, or the LaTeX error.
-async function runTex($: Engine, dir: string, source: string, dvisvgmArgs: string[]): Promise<string[] | { error: string }> {
+async function runTex($: Engine, dir: string, doc: TexDoc, dvisvgmArgs: string[]): Promise<string[] | { error: string }> {
   const { bin } = tex!
-  try {
+  const latex = async (source: string, fmt: string | null) => {
     await $.fs.write(`${dir}/d.tex`, source)
-    const latex = await $.process.run(
-      [`${bin}/latex`, '-no-shell-escape', '-interaction=nonstopmode', '-halt-on-error', 'd.tex'],
+    return $.process.run(
+      [`${bin}/latex`, ...(fmt ? [`-fmt=${fmt}`] : []), '-no-shell-escape', '-interaction=nonstopmode', '-halt-on-error', 'd.tex'],
       { cwd: dir, timeoutMs: 60000 },
     )
-    if (latex.exitCode !== 0) return { error: texError(latex.stdout) }
+  }
+  try {
+    const fmt = await formatFor($, doc)
+    let run = fmt ? await latex(doc.rest, fmt) : await latex(fullDocument(doc), null)
+    if (run.exitCode !== 0 && fmt) {
+      // Either the document has an error or the format does. The whole
+      // document tells them apart.
+      run = await latex(fullDocument(doc), null)
+      if (run.exitCode === 0) brokenFormats.add(formatName(doc))
+    }
+    if (run.exitCode !== 0) return { error: texError(run.stdout) }
     const dvisvgm = await $.process.run([`${bin}/dvisvgm`, '--no-fonts', ...dvisvgmArgs, 'd.dvi'], {
       cwd: dir,
       timeoutMs: 60000,
@@ -132,6 +185,19 @@ async function compileMath($: Engine, jobs: MathJob[], font: LatexFont): Promise
   for (const job of todo) await compileMath($, [job], font)
 }
 
+// A compiled SVG already on disk is read straight into memory while
+// drawing, so a cached diagram appears at once instead of after a compile
+// round trip.
+async function fromDisk($: Engine, file: string, key: string): Promise<Rendered | undefined> {
+  if (!tex) return undefined
+  const path = `${tex.cacheDir}/${file}`
+  if (!(await $.fs.exists(path).catch(() => false))) return undefined
+  const svg = await $.fs.read(path).catch(() => '')
+  if (!svg) return undefined
+  setResult(key, { svg })
+  return { svg }
+}
+
 export const register: Register = (on, options) => {
   const scheme = (['light', 'dark'].includes(String(options.colorScheme))
     ? options.colorScheme
@@ -159,6 +225,12 @@ export const register: Register = (on, options) => {
       const ready = await findTex($, home, path).catch(() => false)
       if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so maths uses MathJax')
       if (ready) {
+        // Build the common formats now, in the background, so the first
+        // diagram does not wait for them.
+        const font = latexFont ?? 'cm'
+        void formatFor($, documentForBlock({ key: '', lang: 'tikz', source: '' }, font, ''))
+        void formatFor($, documentForBlock({ key: '', lang: 'latex', source: '' }, font, ''))
+        if (latexFont) void formatFor($, documentForMath([], latexFont, ''))
         let running = 0
         let finished = 0
         let lastBump = 0
@@ -208,6 +280,24 @@ export const register: Register = (on, options) => {
     const { Box, Text, Markdown, Svg, Button } = $.ui.resolve(e)
     const useLatex = latexFont !== null && tex !== null
     let isWaiting = false
+
+    // Fill the in-memory results from the disk cache before drawing.
+    for (const p of pieces) {
+      if (p.kind === 'block') {
+        const key = hashOf('block', latexFont ?? 'cm', p.lang, macros, p.source)
+        if (!resultOf(key)) await fromDisk($, `b-${key}.svg`, key)
+      }
+      if (useLatex && (p.kind === 'display' || p.kind === 'inline')) {
+        const formulas =
+          p.kind === 'display'
+            ? [{ tex: p.tex, display: true }]
+            : p.lines.flatMap(l => l.spans.flatMap(sp => (sp.kind === 'math' ? [{ tex: sp.tex, display: false }] : [])))
+        for (const f of formulas) {
+          const key = hashOf('math', latexFont, f.display ? 'D' : 'I', macros, f.tex)
+          if (!resultOf(key)) await fromDisk($, `m-${key}.svg`, key)
+        }
+      }
+    }
 
     const formula = (source: string, display: boolean) => {
       if (useLatex) {

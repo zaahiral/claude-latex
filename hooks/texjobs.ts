@@ -5,6 +5,10 @@
 export type BlockLang = 'tikz' | 'tikzcd' | 'latex'
 export type Rendered = { svg: string } | { error: string }
 export type MathJob = { key: string; tex: string; display: boolean }
+// A document in two parts. `base` is the class and the fixed preamble, the
+// same for every document of one kind and font, so it can be saved once as a
+// LaTeX format and reused. `rest` is everything that changes per document.
+export type TexDoc = { kind: string; base: string; rest: string }
 export type BlockJob = { key: string; lang: BlockLang; source: string }
 
 // Font packages for latex in DVI mode. Each line has been compiled with
@@ -87,25 +91,28 @@ export function takeMathBatch(max: number): MathJob[] {
   return batch
 }
 
-function preamble(font: LatexFont, macros: string, extra: string[]): string[] {
+function preamble(font: LatexFont, extra: string[]): string[] {
   return [
     '\\usepackage{amsmath}',
     FONTS[font],
     '\\usepackage{bm,mathtools,xcolor,cancel,braket}',
     '\\usepackage[version=4]{mhchem}',
     ...extra,
-    macros,
   ]
+}
+
+export function fullDocument(doc: TexDoc): string {
+  return `${doc.base}\n${doc.rest}`
 }
 
 // Each formula is one page. An inline formula's box is padded so its
 // baseline sits 0.75ex below the box's vertical centre, the same rule the
 // MathJax path uses, so a row of words and formulas centred on that line
 // keeps every baseline level.
-export function documentForMath(jobs: MathJob[], font: LatexFont, macros: string): string {
-  return [
+export function documentForMath(jobs: MathJob[], font: LatexFont, macros: string): TexDoc {
+  const base = [
     '\\documentclass[dvisvgm,multi=mjpage,border=0pt]{standalone}',
-    ...preamble(font, macros, []),
+    ...preamble(font, []),
     '\\newsavebox\\mjbox',
     '\\newlength\\mjabove \\newlength\\mjbelow \\newlength\\mjhalf',
     '\\newenvironment{mjpage}{\\hbox\\bgroup}{\\egroup}',
@@ -116,11 +123,15 @@ export function documentForMath(jobs: MathJob[], font: LatexFont, macros: string
     '  \\setlength\\mjhalf{\\ifdim\\mjabove>\\mjbelow\\mjabove\\else\\mjbelow\\fi}%',
     '  \\begin{mjpage}\\raisebox{0pt}[\\dimexpr\\mjhalf+0.75ex\\relax][\\dimexpr\\mjhalf-0.75ex\\relax]{\\usebox\\mjbox}\\end{mjpage}}',
     '\\newcommand\\mjdisplay[1]{\\begin{mjpage}\\kern2pt\\vbox{\\kern3pt\\hbox{$\\displaystyle #1$}\\kern3pt}\\kern2pt\\end{mjpage}}',
+  ].join('\n')
+  const rest = [
+    macros,
     '\\begin{document}',
     ...jobs.map(job => (job.display ? `\\mjdisplay{${displayBody(job.tex)}}` : `\\mjinline{${job.tex}}`)),
     '\\end{document}',
     '',
   ].join('\n')
+  return { kind: `math-${font}`, base, rest }
 }
 
 // An align or gather environment cannot sit inside $...$: give it the
@@ -136,7 +147,7 @@ function displayBody(tex: string): string {
     .replace(/\\label\{[^}]*\}/g, '')
 }
 
-export function documentForBlock(job: BlockJob, font: LatexFont, macros: string): string {
+export function documentForBlock(job: BlockJob, font: LatexFont, macros: string): TexDoc {
   // Lines that belong in the preamble may lead the block.
   const lines = job.source.split('\n')
   const leading: string[] = []
@@ -156,17 +167,14 @@ export function documentForBlock(job: BlockJob, font: LatexFont, macros: string)
     '\\pgfplotsset{compat=newest}',
     '\\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,shapes.misc,decorations.pathreplacing,matrix,fit,backgrounds}',
   ]
-  return [
+  const base = [
     isPicture
       ? '\\documentclass[dvisvgm,border=3pt]{standalone}'
       : '\\documentclass[dvisvgm,varwidth=15cm,border=4pt]{standalone}',
-    ...preamble(font, macros, isPicture ? tikz : []),
-    ...leading,
-    '\\begin{document}',
-    body,
-    '\\end{document}',
-    '',
+    ...preamble(font, isPicture ? tikz : []),
   ].join('\n')
+  const rest = [macros, ...leading, '\\begin{document}', body, '\\end{document}', ''].join('\n')
+  return { kind: `${isPicture ? 'picture' : 'text'}-${font}`, base, rest }
 }
 
 export function texError(log: string): string {
