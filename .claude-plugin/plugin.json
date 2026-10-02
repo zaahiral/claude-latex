@@ -2,7 +2,7 @@
   "name": "latex",
   "displayName": "LaTeX",
   "version": "0.4.0",
-  "description": "Render TeX math, TikZ diagrams and LaTeX blocks in Claude's replies in the Claude Code desktop app, in any of 10 LaTeX fonts",
+  "description": "Render TeX math, TikZ diagrams and LaTeX blocks in Claude Code's desktop app, in any of 10 LaTeX fonts, with every LaTeX compile sandboxed",
   "author": {
     "name": "Zaahir Ali"
   },
@@ -79,5 +79,6 @@
   },
   "homepage": "https://github.com/zaahiral/claude-latex",
   "repository": "https://github.com/zaahiral/claude-latex",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "icon": "./assets/logo.png"
 }

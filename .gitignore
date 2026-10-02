@@ -4,3 +4,4 @@ build/out/
 tsconfig.json
 .DS_Store
 tools/node_modules/
+assets/banner-concepts/

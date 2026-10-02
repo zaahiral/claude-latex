@@ -1,62 +1,88 @@
-<p align="center"><img src="assets/logo.png" width="160" alt="Clawd above the LaTeX logo"></p>
+<p align="center">
+  <img src="assets/banner.gif" width="800" alt="A pixel-art study. Clawd stands by a chalkboard of typeset equations and says: My math renders now!">
+</p>
 
-# LaTeX for Claude Code
+<h1 align="center">LaTeX for Claude Code</h1>
 
-A Claude Code mod that renders TeX math, TikZ diagrams and LaTeX blocks in the Code tab of the Claude desktop app. Formulas can be typeset in any of 10 LaTeX fonts by your own TeX install.
+<p align="center">
+  Renders TeX math, TikZ diagrams and LaTeX blocks in Claude's replies, in the Claude Code desktop app.
+</p>
 
-This is a community plugin. It is not made or endorsed by Anthropic.
+<p align="center">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="Claude Code 2.1.287 or later" src="https://img.shields.io/badge/Claude%20Code-2.1.287%2B-555">
+  <img alt="Desktop app, Code tab" src="https://img.shields.io/badge/runs%20in-desktop%20Code%20tab-555">
+</p>
 
-Without it, Claude's replies show math as raw source, such as `$\frac{\partial L}{\partial \phi}$`. With it, the same reply shows typeset math.
+Without this mod, Claude's replies show math as raw source, such as `$\frac{\partial L}{\partial w}$`. With it, the same reply shows typeset math. With a TeX install, it also compiles diagrams, circuits, chess positions and whole LaTeX snippets right in the chat.
 
-## What it renders
-
-| You write | You see |
-| --- | --- |
-| `$...$` or `\(...\)` | Inline math, aligned with the surrounding text |
-| `$$...$$`, `\[...\]`, `equation`, `align`, `gather`, `multline` | Centered display math with a **Copy TeX** button |
-| A ` ```tikz ` or ` ```tikzcd ` code block | A diagram compiled by your own TeX install |
-| A ` ```latex ` code block | Any LaTeX snippet compiled by your own TeX install: chemfig, quantikz, bussproofs, algorithmic, tables |
-
-It also works on math in the messages you send.
-
-MathJax handles AMS environments, `mathtools`, `\ce{}` chemistry (mhchem), `\dv` and `\qty` (physics), `\bra`/`\ket` (braket), `\cancel` and `\color`. `\bm` works as `\boldsymbol`.
-
-Dollar amounts are left alone. `$5 and $10` stays as text, because a closing `$` followed by a digit, or an opening `$` followed by a space, does not start math. Math inside code blocks and inline code is left as code. A formula MathJax cannot parse is shown as red TeX source.
+<p align="center">
+  <img src="assets/demo-math.png" width="720" alt="Colored inline math, every math alphabet, colored boxes and a nested continued fraction, rendered in a Claude Code reply">
+</p>
 
 ## Install
-
-You need Claude Code 2.1.287 or later, which is the first release with mods.
 
 ```sh
 claude plugin marketplace add zaahiral/claude-latex
 claude plugin install latex@claude-latex
 ```
 
-Restart the desktop app, or run `/reload-plugins` in an open session.
+Then restart the desktop app, or run `/reload-plugins` in an open session. A short welcome note appears above the prompt the first time. Run `/latex` at any time to open the settings.
+
+Requirements:
+
+- **Claude Code 2.1.287 or later**, the first release with mods.
+- **The Code tab of the Claude desktop app.** Mods do not draw in a terminal or in the VS Code extension. See [Where it works](#where-it-works).
+- **Optional: a TeX install** with `latex` and `dvisvgm`, such as [MacTeX](https://www.tug.org/mactex/) or TeX Live. You need it for diagrams, LaTeX blocks and the extra fonts. Math works without it.
+
+## What it renders
+
+| In a reply | You see |
+| --- | --- |
+| `$...$` or `\(...\)` | Inline math, sitting on the text's baseline |
+| `$$...$$`, `\[...\]`, `equation`, `align`, `gather`, `multline` | Centered display math |
+| A ` ```tikz ` or ` ```tikzcd ` code block | A diagram, compiled by your TeX install |
+| A ` ```latex ` code block | Any LaTeX snippet: chemfig, quantikz, circuitikz, forest, chessboard, amsthm, tables |
+
+<p align="center">
+  <img src="assets/demo-diagrams.png" width="800" alt="A snake lemma, a chess position, a Feynman diagram, a phase portrait, a polar rose and a 3D sphere, all rendered in Claude Code replies">
+</p>
+
+The two example images above are screenshots of the mod running in the Code tab.
+
+MathJax draws the math. It knows AMS environments, `mathtools`, chemistry with `\ce` (mhchem), `\dv` and `\qty` (physics), `\bra` and `\ket` (braket), `\cancel` and `\color`. `\bm` works as `\boldsymbol`.
+
+Dollar amounts are left alone. `$5 and $10` stays as text, because an opening `$` followed by a space, or a closing `$` followed by a digit, does not start math. Math inside code is left as code. A formula MathJax cannot parse shows as red source, and the rest of the message still renders.
+
+### Your own messages
+
+Your message keeps the app's own bubble, with its copy button. Under it, the mod shows the math and diagrams from your message, rendered, so you can check what you typed. Turn on **Full rendered copy of your messages** to show the whole message rendered under the bubble, Markdown included.
+
+## Fonts
+
+<p align="center">
+  <img src="assets/fonts.png" width="720" alt="The same formula typeset in ten fonts">
+</p>
+
+MathJax has one font, Computer Modern, and draws at once. Set **Math font** to one of `cm`, `libertinus`, `palatino`, `times`, `euler`, `concrete`, `fourier`, `stix2`, `kpfonts` or `cmbright`, and your own LaTeX typesets every formula in that font. MathJax shows each formula until the LaTeX version is ready, usually within a second. All formulas in a message compile in one run, and results are cached in `~/.cache/claude-latex/`. Diagrams and LaTeX blocks use the same font.
 
 ## Settings
 
-Change these in `/config` or in the plugin's settings in `/plugin`.
+Run `/latex` to open the settings pane. Each change applies at once.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Math font | `mathjax` | `mathjax` draws instantly in Computer Modern. Any other choice typesets every formula with your local LaTeX in that font. |
-| Math color | `auto` | `auto` follows your system's light or dark setting. Pick `light` or `dark` if the app's theme differs from your system's. |
-| Compile LaTeX blocks | on | Compile ` ```tikz `, ` ```tikzcd ` and ` ```latex ` blocks with `latex` and `dvisvgm`. |
-| Render math in your messages | on | Also render math in the messages you send. |
-| Macros file | `~/.claude/latex-macros.tex` | Definitions applied to every formula. |
-
-### Fonts
-
-![The same formula in all 10 fonts](assets/fonts.png)
-
-Set **Math font** to `cm`, `libertinus`, `palatino`, `times`, `euler`, `concrete`, `fourier`, `stix2`, `kpfonts` or `cmbright`. Each formula first appears in MathJax, then the LaTeX version replaces it, usually within a second. All formulas in a message are typeset in one LaTeX run and cached in `~/.cache/claude-latex/`. A formula LaTeX rejects stays in MathJax. Diagrams and LaTeX blocks use the same font.
-
-This needs `latex` and `dvisvgm`. TeX Live and MacTeX include the fonts above.
+| Math font | `mathjax` | MathJax, or one of 10 LaTeX fonts typeset by your TeX install |
+| Math color | `auto` | `auto` follows your system's light or dark setting. Pick `light` or `dark` if the app's theme differs |
+| Compile LaTeX blocks | on | Compile ` ```tikz `, ` ```tikzcd ` and ` ```latex ` blocks |
+| Math under your messages | on | Show the math and diagrams from your messages under the bubble |
+| Full rendered copy of your messages | off | Show your whole message rendered under the bubble |
+| Copy TeX button | off | A button under each display formula and block that copies its source |
+| Macros file | `~/.claude/latex-macros.tex` | Your own `\newcommand` and `\DeclareMathOperator` lines |
 
 ### Macros
 
-Put `\newcommand` and `\DeclareMathOperator` lines in `~/.claude/latex-macros.tex`:
+Put definitions in `~/.claude/latex-macros.tex`:
 
 ```tex
 \newcommand{\E}{\mathbb{E}}
@@ -64,20 +90,11 @@ Put `\newcommand` and `\DeclareMathOperator` lines in `~/.claude/latex-macros.te
 \DeclareMathOperator*{\argmin}{arg\,min}
 ```
 
-Then `$\E[X]$` and `$\argmin_\theta L(\theta)$` work in every message, in MathJax and in LaTeX. An error in the file is printed once in the transcript when a session starts.
+`$\E[X]$` and `$\argmin_\theta L(\theta)$` then work in every message, in MathJax and in LaTeX.
 
-### TikZ and LaTeX blocks
+### LaTeX blocks
 
-These need a TeX install that has `latex` and `dvisvgm`, such as TeX Live or MacTeX. The mod looks in `/Library/TeX/texbin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and your `PATH`. Without one, TikZ blocks stay as code.
-
-A ` ```tikz ` block holds the inside of a `tikzpicture`. A ` ```tikzcd ` block holds the inside of a `tikzcd`. A ` ```latex ` block holds a document body up to 15 cm wide. Lines at the top of any block that start with `\usepackage`, `\usetikzlibrary`, `\pgfplotsset`, `\tikzset`, `\newcommand` or `\DeclareMathOperator` go into the preamble.
-
-````md
-```tikzcd
-A \arrow[r, "f"] \arrow[d, "g"'] & B \arrow[d, "h"] \\
-C \arrow[r, "k"'] & D
-```
-````
+A ` ```tikz ` block holds the inside of a `tikzpicture`. A ` ```tikzcd ` block holds the inside of a `tikzcd`. A ` ```latex ` block holds a document body up to 15 cm wide. Lines at the top of a block that start with `\usepackage`, `\usetikzlibrary`, `\pgfplotsset`, `\tikzset`, `\newcommand`, `\DeclareMathOperator`, `\DeclareMathAlphabet`, `\newtheorem`, `\definecolor` and similar go into the preamble.
 
 ````md
 ```latex
@@ -86,33 +103,46 @@ C \arrow[r, "k"'] & D
 ```
 ````
 
-Every block loads `amsmath`, `bm`, `mathtools`, `xcolor`, `cancel`, `braket` and `mhchem`. TikZ blocks also load `tikz-cd`, `pgfplots` and the TikZ libraries `arrows.meta`, `positioning`, `calc`, `shapes.geometric`, `shapes.misc`, `decorations.pathreplacing`, `matrix`, `fit` and `backgrounds`.
+Every block loads `amsmath`, `bm`, `mathtools`, `xcolor`, `cancel`, `braket` and `mhchem`. TikZ blocks also load `tikz-cd`, `pgfplots` and the common TikZ libraries. Black ink follows your theme. Other colors stay as written.
 
-A diagram compiles in about a second the first time. Compiled diagrams are cached in `~/.cache/claude-latex/`. Black lines and text follow the theme. Other colors stay as written.
+## Speed
 
-LaTeX runs with `-no-shell-escape`, so a diagram cannot run shell commands. A diagram can still read files your user can read through `\input`, the same as any LaTeX document you compile.
+A diagram takes 0.4 to 0.7 seconds to compile the first time and is instant after that. Three compiles run at once. Each kind of document compiles against a saved LaTeX format that already holds its preamble, which roughly halves LaTeX's time. Formats build once, in the background.
+
+## Security
+
+Claude writes the LaTeX blocks, so a reply could try to make LaTeX read or write your files. The mod treats every block as untrusted:
+
+- Shell escape is off (`-no-shell-escape`).
+- Every `latex` and `dvisvgm` run goes through macOS's `sandbox-exec`. The sandbox blocks reading your home folder apart from TeX's own folders and the mod's cache, blocks writing anywhere else, and blocks the network.
+- TeX's own `openout_any=p` blocks writing outside the build folder.
+- A compile is stopped after 60 seconds.
+- A drawing over the app's 128 KB limit shows an error on that block instead of breaking the message.
+
+Details and how to report a problem are in [SECURITY.md](SECURITY.md).
 
 ## Where it works
 
 | Where | Renders |
 | --- | --- |
-| Code tab of the Claude desktop app | Yes |
+| Code tab of the Claude desktop app, macOS | Yes |
+| Code tab on Windows | Math yes. LaTeX blocks are not supported yet |
 | Claude mobile app through Remote Control | Should work, not tested |
-| `claude` in a terminal | No. Terminals cannot draw SVG. Math shows as source. |
-| VS Code extension, `claude -p` | No. Mods do not draw there. |
+| `claude` in a terminal | No. Terminals cannot draw SVG |
+| VS Code extension, `claude -p` | No. Mods do not draw there |
+
+## Troubleshooting
+
+- **LaTeX blocks stay as code.** The mod did not find `latex` and `dvisvgm`. It looks in `/Library/TeX/texbin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and your `PATH`.
+- **Something else looks wrong.** Each session writes a setup log to `~/.cache/claude-latex/debug/setup.log`, with every setup step, how long it took, and any drawing error. Attach it to a bug report.
 
 ## How it works
 
-A mod is a plugin whose code runs inside Claude Code. This one hooks the drawing of each message (`ui.render` on `AssistantMessage` and `UserMessage`). When a message contains math, it splits the text into pieces:
+A mod is a plugin whose code runs inside Claude Code. This one hooks the drawing of each message (`ui.render` on `AssistantMessage` and `UserMessage`). When a message contains math, it splits the text into pieces. Prose goes back to the app's own Markdown renderer. Display math becomes an SVG from [MathJax 3](https://www.mathjax.org/), which runs inside the mod with no network access. A paragraph with inline math is laid out word by word, with each formula padded so its baseline lines up with the text. LaTeX blocks are queued, compiled in the background with `latex` and `dvisvgm`, and drawn when ready.
 
-- Paragraphs without math go back to the app's own Markdown renderer.
-- Display math becomes an SVG from [MathJax 3](https://www.mathjax.org/), bundled in `hooks/mathjax/`.
-- A paragraph with inline math is laid out word by word. Each formula is an SVG padded so its baseline lines up with the text.
-- TikZ blocks are queued. A timer compiles them with `latex` and `dvisvgm` and asks for a redraw.
+The MathJax bundle is in `hooks/mathjax/`, split into chunks because a mod cannot import a file over 1 MiB. `build/build.sh` rebuilds it from `mathjax-full` 3.2.2, so you can check it against the published source.
 
-MathJax runs inside the mod, with no browser page and no network access. The bundle is split into chunks because a mod cannot import a file over 1 MiB. `build/build.sh` rebuilds it from `mathjax-full` 3.2.2, so you can check the minified files match the published source.
-
-Before installing, you can list everything the mod hooks and calls:
+To list everything the mod hooks and calls before you install it:
 
 ```sh
 claude plugin validate .
@@ -120,11 +150,10 @@ claude plugin validate .
 
 ## Known limits
 
-- Inline math is centered on the text's middle line, so a tall formula such as a fraction can sit slightly high or low next to the words.
-- A paragraph with inline math loses Markdown links and nested formatting. Bold, italic and inline code are kept.
+- A very long inline formula is scaled down to fit the line.
 - Tables keep the app's own rendering, so math inside a table cell stays as source.
-- MathJax packages included: base, ams, newcommand, mhchem, physics, boldsymbol, cancel, color, braket, textmacros, mathtools.
-- MathJax has one font. The other fonts need a local TeX install.
+- A paragraph with inline math loses Markdown links. Bold, italic and inline code are kept.
+- Markdown in your own message cannot render inside the app's bubble. Turn on the full rendered copy to see it under the bubble.
 
 ## Develop
 
@@ -138,4 +167,6 @@ The tests need Claude Code 2.1.286 or later. They fake `latex` and `dvisvgm`, so
 
 ## License
 
-MIT. MathJax is Apache 2.0, and its license is in `hooks/mathjax/LICENSE`. Clawd is Anthropic's Claude Code mascot. The logo is drawn in TikZ in `assets/logo.tex`.
+MIT. MathJax is Apache 2.0, and its license is in `hooks/mathjax/LICENSE`.
+
+This is a community plugin. It is not made or endorsed by Anthropic. Clawd is Anthropic's Claude Code mascot.
