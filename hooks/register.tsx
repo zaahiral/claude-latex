@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 import { definePreamble, renderTex, withInk, type ColorScheme } from './math'
 import { drawMessage } from './draw'
-import { keepLineBreaks, looksLikeMath, parse } from './parse'
+import { keepLineBreaks, looksLikeMath, mathOnly, parse } from './parse'
 import {
   BIN_CANDIDATES,
   documentForBlock,
@@ -48,10 +48,6 @@ const PANE = 'latex-settings'
 // The user's own messages get Markdown. Notifications, agents and peers
 // keep the app's drawing.
 const OWN_MESSAGES = new Set(['composer', 'sdk', 'bridge', 'unclassified'])
-
-// A light box behind your own messages, readable on light and dark themes.
-const USER_BUBBLE = '#8080801f'
-let probedUserDrawing = false
 
 const FONT_CHOICES = ['mathjax', 'cm', 'libertinus', 'palatino', 'times', 'euler', 'concrete', 'fourier', 'stix2', 'kpfonts', 'cmbright']
 // Compiles run side by side, each in its own folder.
@@ -459,36 +455,34 @@ export const register: Register = (on, options) => {
     const isUser = e.component === 'UserMessage'
     if (isUser && (e.props.task || e.props.from || !OWN_MESSAGES.has(e.props.origin.kind))) return next(e)
     const text = isUser ? keepLineBreaks(e.props.text) : e.props.text
-    const withMath = !isUser || renderUser
-    const { Box } = $.ui.resolve(e)
-    // Your own messages sit in a rounded bubble on the right, sized to the
-    // text, so they stay apart from replies.
-    const asYours = (tree: ReturnType<typeof drawMessage>) =>
-      isUser ? (
-        <Box flexDirection="row" justifyContent="flex-end">
-          <Box flexDirection="column" flexShrink={1} backgroundColor={USER_BUBBLE} borderStyle="round" borderColor={USER_BUBBLE} paddingX={1}>
-            {tree}
-          </Box>
+    const { Box, Markdown: MarkdownElement } = $.ui.resolve(e)
+    // Your own message keeps the app's own bubble, with its copy button and
+    // the rest. The mod adds the rendered math under it: just the math by
+    // default, or a full rendered copy when that setting is on.
+    const native = isUser ? await next(e) : null
+    const mode = !isUser ? 'reply' : userMarkdown ? 'full' : renderUser ? 'math' : 'none'
+    const underBubble = (tree: ReturnType<typeof drawMessage>) => (
+      <Box flexDirection="column">
+        {native}
+        <Box flexDirection="column" marginTop={1}>
+          {tree}
         </Box>
-      ) : (
-        tree
-      )
-    if (isUser && !probedUserDrawing && debugDir) {
-      probedUserDrawing = true
-      void next(e)
-        .then(drawn => $.fs.write(`${debugDir}/user-message-drawing.json`, JSON.stringify(drawn, null, 1)))
-        .catch(() => undefined)
-    }
-    const markdownOnly = () => {
-      const { Markdown } = $.ui.resolve(e)
-      return asYours(<Markdown text={text} />)
-    }
+      </Box>
+    )
+    if (mode === 'none') return native ?? next(e)
     // Before TeX is found, blocks are left as code. Listen for the redraw
     // that follows TeX setup.
     if (blocksOn && tex === null && /```\s*(tikz|latex)/.test(text)) await read($, version)
-    if (!withMath || !looksLikeMath(text)) return isUser && userMarkdown ? markdownOnly() : next(e)
-    const pieces = parse(text, { blocks: blocksOn && tex !== null })
-    if (!pieces.some(p => p.kind !== 'md')) return isUser && userMarkdown ? markdownOnly() : next(e)
+    if (!looksLikeMath(text)) {
+      if (mode === 'full') return underBubble(<MarkdownElement text={text} />)
+      return native ?? next(e)
+    }
+    let pieces = parse(text, { blocks: blocksOn && tex !== null })
+    if (mode === 'math') pieces = mathOnly(pieces)
+    if (!pieces.some(p => p.kind !== 'md')) {
+      if (mode === 'full') return underBubble(<MarkdownElement text={text} />)
+      return native ?? next(e)
+    }
 
     const { Text, Markdown, Svg, Button } = $.ui.resolve(e)
     const useLatex = latexFont !== null && tex !== null
@@ -547,7 +541,7 @@ export const register: Register = (on, options) => {
     // Only a message still waiting on a compile listens for finished
     // compiles. A finished message is never redrawn by them.
     if (isWaiting) await read($, version)
-    return asYours(tree)
+    return isUser ? underBubble(tree) : tree
     } catch (error) {
       // Never leave a message undrawn: fall back to the app's own drawing.
       debug($, `render error (${e.component}, ${e.props.text.length} chars): ${String(error)}`)
@@ -570,7 +564,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         <Text bold>LaTeX mod is on</Text>
         <Text dimColor>
-          Math, TikZ and LaTeX blocks in replies now render. You can pick one of 10 math fonts, turn Markdown in your messages on or off, and show a Copy TeX button.
+          Math, TikZ and LaTeX blocks in replies now render, and the math in your own messages shows under them. You can pick one of 10 math fonts and show a Copy TeX button.
         </Text>
         <Box flexDirection="row" gap={1}>
           <Button
@@ -639,8 +633,8 @@ export const register: Register = (on, options) => {
             <Text>{colorValue}</Text>
           )}
         </Box>
-        {toggle('userMarkdown', 'Markdown in your messages', 'Your sent messages show bold, lists, code and tables.', userMarkdown)}
-        {toggle('userMessages', 'Math in your messages', 'Your sent messages render $...$ math.', renderUser)}
+        {toggle('userMarkdown', 'Full rendered copy of your messages', 'Under your message bubble, the whole message rendered: Markdown and math.', userMarkdown)}
+        {toggle('userMessages', 'Math under your messages', 'Under your message bubble, the math and diagrams from it, rendered.', renderUser)}
         {toggle('copyButton', 'Copy TeX button', 'A button under each display formula and LaTeX block.', showCopy)}
         {toggle('tikz', 'Compile LaTeX blocks', 'tikz, tikzcd and latex code blocks, using your TeX install.', blocksOn)}
         <Text dimColor>Macros file: {String(options.macrosFile || '~/.claude/latex-macros.tex')}. Reopen this pane with /latex.</Text>

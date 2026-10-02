@@ -182,3 +182,25 @@ export function keepLineBreaks(text: string): string {
     })
     .join('\n')
 }
+
+// The math of a message without its prose: display formulas and LaTeX
+// blocks as they are, and every inline formula gathered into one row.
+// Drawn under your own message, whose text the app's bubble already shows.
+export function mathOnly(pieces: Piece[]): Piece[] {
+  const out: Piece[] = []
+  const inline: Span[] = []
+  for (const p of pieces) {
+    if (p.kind === 'display' || p.kind === 'block') out.push(p)
+    if (p.kind === 'inline') {
+      for (const line of p.lines) {
+        for (const span of line.spans) {
+          if (span.kind !== 'math') continue
+          if (inline.length) inline.push({ kind: 'text', text: `${NBSP}${NBSP}${NBSP}`, bold: false, italic: false, code: false })
+          inline.push(span)
+        }
+      }
+    }
+  }
+  if (inline.length) out.unshift({ kind: 'inline', lines: [{ prefix: '', heading: false, spans: inline }] })
+  return out
+}

@@ -54,14 +54,14 @@
     },
     "userMarkdown": {
       "type": "boolean",
-      "title": "Markdown in your messages",
-      "description": "Show the messages you send with Markdown formatting (bold, lists, code, tables), the way Claude's replies are shown.",
-      "default": true
+      "title": "Full rendered copy of your messages",
+      "description": "Under your message bubble, show the whole message rendered: Markdown and math. Off by default, since it repeats your text.",
+      "default": false
     },
     "userMessages": {
       "type": "boolean",
-      "title": "Render math in your messages",
-      "description": "Also render math in the messages you send.",
+      "title": "Math under your messages",
+      "description": "Under your message bubble, show the math and diagrams from your message, rendered.",
       "default": true
     },
     "copyButton": {

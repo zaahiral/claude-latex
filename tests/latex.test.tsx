@@ -51,14 +51,21 @@ test('shows a bad formula as red source', async $ => {
   await ui.unmount()
 })
 
-test('renders math in the messages you send', async $ => {
+test('keeps the native bubble and draws your math under it', async ($, on) => {
+  on('ui.render', async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>native bubble</Text>
+  })
   const ui = await $.ui.mount({
     plugin: 'latex',
     surface: 'desktop',
     component: 'UserMessage',
-    props: { text: 'why is $\\mathbb{E}[X^2] \\ge \\mathbb{E}[X]^2$?', origin: { kind: 'composer' }, isExpanded: true } as never,
+    props: { text: 'why is $\\mathbb{E}[X^2] \\ge \\mathbb{E}[X]^2$ and **this** bold?', origin: { kind: 'composer' }, isExpanded: true } as never,
   })
+  expect(await ui.find({ type: 'Text', text: /native bubble/ })).toBeDefined()
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
+  // Only the math is drawn under the bubble, not the prose again.
+  expect(await ui.find({ type: 'Text', text: /bold/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -200,21 +207,26 @@ test('draws Copy TeX buttons when the setting is on', { options: { copyButton: t
 
 const own = (text: string) => ({ text, origin: { kind: 'composer' }, isExpanded: true }) as never
 
-test('renders your own message as Markdown and keeps its line breaks', async $ => {
+test('a full rendered copy goes under the bubble when that setting is on', { options: { userMarkdown: true } }, async ($, on) => {
+  on('ui.render', async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>native bubble</Text>
+  })
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('**bold** and a list:\n- one\n- two\nline one\nline two') })
+  expect(await ui.find({ type: 'Text', text: /native bubble/ })).toBeDefined()
   const md = await ui.find({ type: 'Markdown' })
-  expect(md).toBeDefined()
   expect(String(md?.props.text)).toContain('line one  \nline two')
   await ui.unmount()
 })
 
-test('leaves your messages to the app when Markdown is off', { options: { userMarkdown: false } }, async ($, on) => {
+test('a message with no math keeps only the native bubble', async ($, on) => {
   on('ui.render', async ($, e) => {
     const { Text } = $.ui.resolve(e)
-    return <Text>engine drew this</Text>
+    return <Text>native bubble</Text>
   })
-  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('**bold**') })
-  expect(await ui.find({ type: 'Text', text: /engine drew/ })).toBeDefined()
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('**bold** only') })
+  expect(await ui.find({ type: 'Text', text: /native bubble/ })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
   await ui.unmount()
 })
 
