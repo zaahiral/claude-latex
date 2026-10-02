@@ -368,9 +368,13 @@ test('the settings pane changes the real settings', async ($, on) => {
     return { value: { value: e.value } as never }
   })
   await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
-  const pane = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'Pane', props: { title: 'LaTeX settings', isFocused: true, bodyColumns: 60, placement: 'dock' } as never, requestId: 'latex-settings' } as never)
+  const pane = await $.ui.mount<'desktop', 'Pane'>({ plugin: 'latex', surface: 'desktop', component: 'Pane', props: { title: 'LaTeX settings', isFocused: true, bodyColumns: 60, placement: 'dock' } as never, requestId: 'latex-settings' } as never)
   expect(await pane.find({ type: 'Select', key: 'math-font' })).toBeDefined()
   await pane.press({ key: 'toggle-copyButton' })
-  expect(sets).toEqual([expect.objectContaining({ key: 'latex.copyButton', value: true })])
+  await pane.select({ key: 'math-font', value: 'euler' })
+  expect(sets).toEqual([
+    expect.objectContaining({ key: 'latex.copyButton', value: true }),
+    expect.objectContaining({ key: 'latex.mathFont', value: 'euler' }),
+  ])
   await pane.unmount()
 })

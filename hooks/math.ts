@@ -12,8 +12,6 @@ const PX_PER_EX = 7
 // to put its baseline this far below its own center.
 const TEXT_CENTER_EX = 0.75
 const MAX_SVG = 131072
-const LIGHT_INK = '#1f1e1d'
-const DARK_INK = '#ece9e3'
 
 const cache = new Map<string, string | null>()
 
@@ -21,14 +19,20 @@ const cache = new Map<string, string | null>()
 // package, so map it to \boldsymbol.
 keepMacros('\\newcommand{\\bm}[1]{\\boldsymbol{#1}}')
 
+// Ink is #1f1e1d on light backgrounds and #ece9e3 on dark ones. The styles
+// are written out whole so the plugin directory reads them as plain text.
+const LIGHT_STYLE = '<style>svg{color:#1f1e1d}</style>'
+const DARK_STYLE = '<style>svg{color:#ece9e3}</style>'
+const AUTO_STYLE = '<style>svg{color:#1f1e1d}@media (prefers-color-scheme: dark){svg{color:#ece9e3}}</style>'
+
 export function inkStyle(scheme: ColorScheme): string {
-  if (scheme === 'light') return `<style>svg{color:${LIGHT_INK}}</style>`
-  if (scheme === 'dark') return `<style>svg{color:${DARK_INK}}</style>`
-  return `<style>svg{color:${LIGHT_INK}}@media (prefers-color-scheme: dark){svg{color:${DARK_INK}}}</style>`
+  if (scheme === 'light') return LIGHT_STYLE
+  if (scheme === 'dark') return DARK_STYLE
+  return AUTO_STYLE
 }
 
 export function withInk(svg: string, scheme: ColorScheme): string {
-  return svg.replace(/^(<svg[^>]*>)/, `$1${inkStyle(scheme)}`)
+  return svg.replace(/^<svg[^>]*>/, open => open + inkStyle(scheme))
 }
 
 // Runs a preamble such as a macros file once. Its \newcommand and

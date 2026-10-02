@@ -19,32 +19,14 @@
     "mathFont": {
       "type": "string",
       "title": "Math font",
-      "description": "mathjax draws instantly in Computer Modern. Any other choice typesets every formula with your local LaTeX in that font, showing MathJax until it is ready.",
-      "default": "mathjax",
-      "options": [
-        "mathjax",
-        "cm",
-        "libertinus",
-        "palatino",
-        "times",
-        "euler",
-        "concrete",
-        "fourier",
-        "stix2",
-        "kpfonts",
-        "cmbright"
-      ]
+      "description": "mathjax draws instantly in Computer Modern. cm, libertinus, palatino, times, euler, concrete, fourier, stix2, kpfonts or cmbright typesets every formula with your local LaTeX in that font, showing MathJax until it is ready. Easiest to pick in /latex.",
+      "default": "mathjax"
     },
     "colorScheme": {
       "type": "string",
       "title": "Math color",
-      "description": "auto follows the system light or dark setting. Pick light or dark if the app's theme differs from the system's.",
-      "default": "auto",
-      "options": [
-        "auto",
-        "light",
-        "dark"
-      ]
+      "description": "auto, light or dark. auto follows the system light or dark setting. Pick light or dark if the app's theme differs from the system's.",
+      "default": "auto"
     },
     "tikz": {
       "type": "boolean",
@@ -55,13 +37,8 @@
     "userBubble": {
       "type": "string",
       "title": "Your messages",
-      "description": "off leaves your messages as typed. under keeps the app's bubble and shows the math from your message below it. rendered is experimental: it draws your message as Markdown with its math in a bubble of the mod's, and keeps the app's row under it as a small pill for the time, rewind and fork controls.",
-      "default": "off",
-      "options": [
-        "off",
-        "under",
-        "rendered"
-      ]
+      "description": "off, under or rendered. off leaves your messages as typed. under keeps the app's bubble and shows the math from your message below it. rendered is experimental: it draws your message as Markdown with its math in a bubble of the mod's, and keeps the app's row under it as a small pill for the time, rewind and fork controls.",
+      "default": "off"
     },
     "tellModel": {
       "type": "boolean",

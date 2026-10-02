@@ -125,6 +125,20 @@ Claude writes the LaTeX blocks, so a reply could try to make LaTeX read or write
 
 Details and how to report a problem are in [SECURITY.md](SECURITY.md).
 
+## What it does on your machine
+
+This is everything the mod runs, reads, writes and changes.
+
+- **Programs it runs.** `latex` and `dvisvgm` from your TeX install, to compile LaTeX blocks and the LaTeX fonts. Every one of those runs goes through `/usr/bin/sandbox-exec`. `/usr/bin/true` runs once per session to check that the sandbox works. `/usr/bin/find`, `/bin/rm` and `/bin/mv` clear old build folders and move a finished LaTeX format into place. Without a TeX install the mod runs nothing.
+- **Environment variables it reads.** `HOME`, to find the cache folder and your macros file. `PATH`, to find `latex` and `dvisvgm`. It sets none.
+- **Files it reads.** Your macros file, and its own cache. It checks whether `latex` and `dvisvgm` exist in the folders listed under [Troubleshooting](#troubleshooting).
+- **Files it writes.** Only inside `~/.cache/claude-latex/`: compiled SVGs, saved LaTeX formats, one build folder per compile (deleted afterwards), the sandbox profile `sandbox.sb` and the setup log `debug/setup.log`.
+- **Settings it changes.** Only its own settings (`latex.mathFont`, `latex.colorScheme`, `latex.userBubble`, `latex.tellModel`, `latex.copyButton`, `latex.tikz`), and only when you change one in the `/latex` pane. It writes them through the app's own settings.
+- **What it stores.** One value: whether you dismissed the welcome note.
+- **The conversation.** It reads each message to draw it. Its `prompt.submit` hook only notes when a turn starts, so the mod does not redraw during a reply. It does not read or change your prompt. With **Tell the model how math renders here** on, it adds one short section to the system prompt. The text is `MODEL_NOTE` in `hooks/register.tsx`.
+- **Network.** None. MathJax runs inside the mod, and the sandbox blocks the network for every LaTeX run. Nothing the mod reads leaves your machine.
+- **The MathJax bundle.** `hooks/mathjax/` is minified. `build/build.sh` builds it from `mathjax-full` 3.2.2. `build/clean.mjs` then removes an unused `__proto__` fallback that TypeScript adds, and writes every character outside ASCII as a `\uXXXX` escape. MathJax's own classes use `Object.setPrototypeOf` and `Object.defineProperty`.
+
 ## Where it works
 
 | Where | Renders |

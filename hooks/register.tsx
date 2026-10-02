@@ -403,9 +403,6 @@ export const register: Register = (on, options) => {
   const bubbleMode: BubbleMode = BUBBLE_MODES.find(mode => mode === options.userBubble) ?? 'off'
   const showCopy = options.copyButton === true
   const tellModel = options.tellModel !== false
-  // The settings rows, by field: `latex.mathFont`, or `latex@inline.mathFont`
-  // for a plugin loaded from a folder. Filled at session start.
-  const configKeys = new Map<string, string>()
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -456,11 +453,8 @@ export const register: Register = (on, options) => {
         }
       })
       await step($, 'settings rows', async () => {
-        for (const row of await $.config.list()) {
-          const m = row.key.match(/^latex(@[\w-]+)?\.(\w+)$/)
-          if (m?.[2]) configKeys.set(m[2], row.key)
-        }
-        debug($, `     keys ${JSON.stringify([...configKeys.values()])}`)
+        const keys = (await $.config.list()).map(row => row.key).filter(key => key.startsWith('latex'))
+        debug($, `     keys ${JSON.stringify(keys)}`)
       })
       await step($, 'register /latex', () => $.command.register({ name: 'latex', description: 'Open the LaTeX mod settings' }))
       await step($, 'welcome band', async () => {
@@ -642,7 +636,7 @@ export const register: Register = (on, options) => {
       // bubble with its text replaced by an ellipsis: a small pill whose
       // controls show on hover. It must be asked for once: the app drew
       // nothing when one drawing held several of its rows.
-      const controls = await next({ ...e, props: { ...e.props, text: CONTROLS_ROW_TEXT } }).catch(() => null)
+      const controls = await next({ ...e, props: { ...e.props, text: CONTROLS_ROW_TEXT } } as typeof e).catch(() => null)
       return (
         <Box flexDirection="column">
           {inBubble(tree)}
@@ -703,15 +697,20 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = elements
     // The mobile app has no Select. Show the value as text there.
     const Select = 'Select' in elements ? elements.Select : undefined
-    const set = (field: string, value: string | boolean) => {
-      const key = configKeys.get(field)
-      if (key) void $.config.set({ key, value }).catch(() => undefined)
-    }
-    const toggle = (field: string, label: string, help: string, isOn: boolean) => (
+    // Each call names its setting in full, so the plugin directory can read
+    // which settings the pane changes. A change reloads the mod.
+    const saved = (change: Promise<unknown>) => void change.catch(error => debug($, `config.set failed: ${error}`))
+    const setMathFont = (value: string) => saved($.config.set({ key: 'latex.mathFont', value }))
+    const setColorScheme = (value: string) => saved($.config.set({ key: 'latex.colorScheme', value }))
+    const setUserBubble = (value: string) => saved($.config.set({ key: 'latex.userBubble', value }))
+    const setTellModel = (value: boolean) => saved($.config.set({ key: 'latex.tellModel', value }))
+    const setCopyButton = (value: boolean) => saved($.config.set({ key: 'latex.copyButton', value }))
+    const setTikz = (value: boolean) => saved($.config.set({ key: 'latex.tikz', value }))
+    const toggle = (field: string, label: string, help: string, isOn: boolean, change: (value: boolean) => void) => (
       <Box flexDirection="column" marginBottom={1}>
         <Box flexDirection="row" gap={1}>
           <Text bold>{label}</Text>
-          <Button key={`toggle-${field}`} label={isOn ? 'On' : 'Off'} variant={isOn ? 'primary' : 'secondary'} onPress={() => set(field, !isOn)} />
+          <Button key={`toggle-${field}`} label={isOn ? 'On' : 'Off'} variant={isOn ? 'primary' : 'secondary'} onPress={() => change(!isOn)} />
         </Box>
         <Text dimColor>{help}</Text>
       </Box>
@@ -727,7 +726,7 @@ export const register: Register = (on, options) => {
               key="math-font"
               value={fontValue}
               options={FONT_CHOICES.map(v => ({ value: v, label: v === 'mathjax' ? 'MathJax (instant)' : v }))}
-              onSelect={(value: string) => set('mathFont', value)}
+              onSelect={setMathFont}
             />
           ) : (
             <Text>{fontValue}</Text>
@@ -741,7 +740,7 @@ export const register: Register = (on, options) => {
               key="math-color"
               value={colorValue}
               options={[{ value: 'auto', label: 'Follow the system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]}
-              onSelect={(value: string) => set('colorScheme', value)}
+              onSelect={setColorScheme}
             />
           ) : (
             <Text>{colorValue}</Text>
@@ -758,16 +757,16 @@ export const register: Register = (on, options) => {
                 { value: 'under', label: 'As typed, with the math under the bubble' },
                 { value: 'rendered', label: 'Rendered: Markdown and math in a bubble (experimental)' },
               ]}
-              onSelect={(value: string) => set('userBubble', value)}
+              onSelect={setUserBubble}
             />
           ) : (
             <Text>{bubbleMode}</Text>
           )}
           <Text dimColor>How a message you sent is drawn. Rendered draws its own bubble and keeps the app's row under it as a small pill, for the time, rewind and fork controls.</Text>
         </Box>
-        {toggle('tellModel', 'Tell the model how math renders here', 'Adds a short note to the system prompt: the syntax that renders, and the size limits.', tellModel)}
-        {toggle('copyButton', 'Copy TeX button', 'A button under each display formula and LaTeX block.', showCopy)}
-        {toggle('tikz', 'Compile LaTeX blocks', 'tikz, tikzcd and latex code blocks, using your TeX install.', blocksOn)}
+        {toggle('tellModel', 'Tell the model how math renders here', 'Adds a short note to the system prompt: the syntax that renders, and the size limits.', tellModel, setTellModel)}
+        {toggle('copyButton', 'Copy TeX button', 'A button under each display formula and LaTeX block.', showCopy, setCopyButton)}
+        {toggle('tikz', 'Compile LaTeX blocks', 'tikz, tikzcd and latex code blocks, using your TeX install.', blocksOn, setTikz)}
         <Text dimColor>Macros file: {String(options.macrosFile || '~/.claude/latex-macros.tex')}. Reopen this pane with /latex.</Text>
       </Box>
     )

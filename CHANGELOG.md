@@ -15,6 +15,7 @@
 - Punctuation stays on the same line as the formula it touches. Nested lists step in, a list with math in it is laid out as one list, and a list that reaches 10 no longer has its numbers clipped.
 - Blank lines at the start and end of a block are dropped. A pasted `tikzcd` block that ended with one failed to compile.
 - The debug log records every message drawn, its size, each compile and any reason the engine gives for refusing a drawing.
+- Changes for the plugin directory. Math font, Math color and Your messages no longer list their choices in `plugin.json`, because the directory does not accept that yet. The `/latex` pane still offers the choices. The pane names each setting it changes in full. The MathJax bundle no longer contains `__proto__`, and every character outside ASCII in it is written as an escape. The README lists everything the mod runs, reads and writes.
 
 ## 0.4.0
 
