@@ -160,7 +160,17 @@ export const register: Register = (on, options) => {
       if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so maths uses MathJax')
       if (ready) {
         let running = 0
+        let finished = 0
+        let lastBump = 0
         $.clock.every(100, () => {
+          // Redraw waiting messages at most every 400 ms, and once more when
+          // the queue drains, rather than once per compile.
+          const now = Date.now()
+          if (finished > 0 && (now - lastBump >= 400 || (running === 0 && !hasQueued()))) {
+            finished = 0
+            lastBump = now
+            void update($, version, n => n + 1).catch(() => undefined)
+          }
           while (running < MAX_WORKERS && hasQueued()) {
             const block = takeBlock()
             const batch = block || !latexFont ? [] : takeMathBatch(60)
@@ -175,11 +185,11 @@ export const register: Register = (on, options) => {
                   for (const job of batch) setResult(job.key, { error: 'compile failed' })
                 })
               }
-              await update($, version, n => n + 1)
             })()
               .catch(() => undefined)
               .finally(() => {
                 running -= 1
+                finished += 1
               })
           }
         })
@@ -195,18 +205,19 @@ export const register: Register = (on, options) => {
     const pieces = parse(e.props.text, { blocks: blocksOn && tex !== null })
     if (!pieces.some(p => p.kind !== 'md')) return next(e)
 
-    // Subscribe this message to finished compiles.
-    await read($, version)
-
     const { Box, Text, Markdown, Svg, Button } = $.ui.resolve(e)
     const useLatex = latexFont !== null && tex !== null
+    let isWaiting = false
 
     const formula = (source: string, display: boolean) => {
       if (useLatex) {
         const key = hashOf('math', latexFont, display ? 'D' : 'I', macros, source)
         const typeset = resultOf(key)
         if (typeset && 'svg' in typeset) return <Svg source={withInk(typeset.svg, scheme)} alt={source} />
-        if (!typeset) requestMath({ key, tex: source, display })
+        if (!typeset) {
+          requestMath({ key, tex: source, display })
+          isWaiting = true
+        }
       }
       const svg = renderTex(source, display)
       if (svg) return <Svg source={withInk(svg, scheme)} alt={source} />
@@ -252,7 +263,7 @@ export const register: Register = (on, options) => {
       />
     )
 
-    return (
+    const tree = (
       <Box flexDirection="column">
         {pieces.map((p, i) => {
           if (p.kind === 'md') return <Markdown text={p.text} />
@@ -267,7 +278,10 @@ export const register: Register = (on, options) => {
           if (p.kind === 'block') {
             const key = hashOf('block', latexFont ?? 'cm', p.lang, macros, p.source)
             const result = resultOf(key)
-            if (!result) requestBlock({ key, lang: p.lang, source: p.source })
+            if (!result) {
+              requestBlock({ key, lang: p.lang, source: p.source })
+              isWaiting = true
+            }
             return (
               <Box flexDirection="column" alignItems="center" marginTop={1} marginBottom={1}>
                 {!result && <Text dimColor>Compiling with LaTeX…</Text>}
@@ -290,5 +304,9 @@ export const register: Register = (on, options) => {
         })}
       </Box>
     )
+    // Only a message still waiting on a compile listens for finished
+    // compiles. A finished message is never redrawn by them.
+    if (isWaiting) await read($, version)
+    return tree
   })
 }
