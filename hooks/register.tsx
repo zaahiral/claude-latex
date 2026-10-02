@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface as Engine, Register, RenderChildren } from 'claude-code'
+import type { EngineInterface as Engine, Register } from 'claude-code'
 import { definePreamble, renderTex, withInk, type ColorScheme } from './math'
-import { looksLikeMath, NBSP, parse, type Line } from './parse'
+import { drawMessage } from './draw'
+import { looksLikeMath, parse } from './parse'
 import {
   BIN_CANDIDATES,
   documentForBlock,
@@ -299,101 +300,37 @@ export const register: Register = (on, options) => {
       }
     }
 
-    const formula = (source: string, display: boolean) => {
-      if (useLatex) {
-        const key = hashOf('math', latexFont, display ? 'D' : 'I', macros, source)
-        const typeset = resultOf(key)
-        if (typeset && 'svg' in typeset) return <Svg source={withInk(typeset.svg, scheme)} alt={source} />
-        if (!typeset) {
-          requestMath({ key, tex: source, display })
+    const tree = drawMessage(pieces, {
+      el: { Box, Text, Markdown, Svg, Button },
+      formula: (source, display) => {
+        if (useLatex) {
+          const key = hashOf('math', latexFont, display ? 'D' : 'I', macros, source)
+          const typeset = resultOf(key)
+          if (typeset && 'svg' in typeset) return withInk(typeset.svg, scheme)
+          if (!typeset) {
+            requestMath({ key, tex: source, display })
+            isWaiting = true
+          }
+        }
+        const svg = renderTex(source, display)
+        return svg ? withInk(svg, scheme) : null
+      },
+      block: p => {
+        const key = hashOf('block', latexFont ?? 'cm', p.lang, macros, p.source)
+        const result = resultOf(key)
+        if (!result) {
+          requestBlock({ key, lang: p.lang, source: p.source })
           isWaiting = true
+          return undefined
         }
-      }
-      const svg = renderTex(source, display)
-      if (svg) return <Svg source={withInk(svg, scheme)} alt={source} />
-      return <Text color="red">{display ? `$$${source}$$` : `$${source}$`}</Text>
-    }
-
-    const drawLine = (line: Line) => {
-      const items: RenderChildren[] = []
-      if (line.prefix) items.push(<Text>{line.prefix}</Text>)
-      for (const span of line.spans) {
-        if (span.kind === 'math') {
-          items.push(formula(span.tex, false))
-          continue
-        }
-        if (span.code) {
-          items.push(<Text>{span.text}</Text>)
-          continue
-        }
-        for (const token of span.text.split(/(\s+)/)) {
-          if (token === '') continue
-          if (/^\s+$/.test(token)) items.push(<Text>{NBSP}</Text>)
-          else items.push(<Text bold={span.bold} italic={span.italic}>{token}</Text>)
-        }
-      }
-      return (
-        <Box flexDirection="row" flexWrap="wrap" alignItems="center">
-          {items}
-        </Box>
-      )
-    }
-
-    const copyButton = (key: string, text: string) => (
-      <Button
-        key={key}
-        label="Copy TeX"
-        plain
-        dimColor
-        onPress={press => {
-          void $.ui.copy({ text, surface: press.surface }).then(r => {
-            if (r.isCopied) $.ui.toast('TeX copied')
-          })
-        }}
-      />
-    )
-
-    const tree = (
-      <Box flexDirection="column">
-        {pieces.map((p, i) => {
-          if (p.kind === 'md') return <Markdown text={p.text} />
-          if (p.kind === 'display') {
-            return (
-              <Box flexDirection="column" alignItems="center" marginTop={1} marginBottom={1}>
-                {formula(p.tex, true)}
-                {copyButton(`copy-${i}`, p.tex)}
-              </Box>
-            )
-          }
-          if (p.kind === 'block') {
-            const key = hashOf('block', latexFont ?? 'cm', p.lang, macros, p.source)
-            const result = resultOf(key)
-            if (!result) {
-              requestBlock({ key, lang: p.lang, source: p.source })
-              isWaiting = true
-            }
-            return (
-              <Box flexDirection="column" alignItems="center" marginTop={1} marginBottom={1}>
-                {!result && <Text dimColor>Compiling with LaTeX…</Text>}
-                {result && 'svg' in result && <Svg source={withInk(result.svg, scheme)} alt={p.source} />}
-                {result && 'error' in result && (
-                  <Box flexDirection="column">
-                    <Text color="red">LaTeX did not compile:</Text>
-                    <Text color="red">{result.error}</Text>
-                  </Box>
-                )}
-                {copyButton(`copy-${i}`, p.source)}
-              </Box>
-            )
-          }
-          return (
-            <Box flexDirection="column" marginTop={1} marginBottom={1}>
-              {p.lines.map(drawLine)}
-            </Box>
-          )
-        })}
-      </Box>
-    )
+        return 'svg' in result ? { svg: withInk(result.svg, scheme) } : result
+      },
+      onCopy: (text, press) => {
+        void $.ui.copy({ text, surface: press.surface }).then(r => {
+          if (r.isCopied) $.ui.toast('TeX copied')
+        })
+      },
+    })
     // Only a message still waiting on a compile listens for finished
     // compiles. A finished message is never redrawn by them.
     if (isWaiting) await read($, version)

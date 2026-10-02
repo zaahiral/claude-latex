@@ -134,6 +134,14 @@ claude --plugin-dir ./claude-latex
 claude plugin test ./claude-latex
 ```
 
+To see what the mod draws without the app, render replies to an HTML page. It uses the mod's own parser and drawing code:
+
+```sh
+cd claude-latex/tools && bun install && cd ..
+bun tools/preview.tsx reply.md --out preview.html
+bun tools/preview.tsx --session ~/.claude/projects/<project>/<session>.jsonl --last 5
+```
+
 The tests need Claude Code 2.1.286 or later. They fake `latex` and `dvisvgm`, so they run without a TeX install.
 
 ## Licence

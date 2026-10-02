@@ -3,3 +3,4 @@ build/out/
 .claude-plugin/types/
 tsconfig.json
 .DS_Store
+tools/node_modules/
