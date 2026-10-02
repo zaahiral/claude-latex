@@ -700,12 +700,12 @@ export const register: Register = (on, options) => {
     // Each call names its setting in full, so the plugin directory can read
     // which settings the pane changes. A change reloads the mod.
     const saved = (change: Promise<unknown>) => void change.catch(error => debug($, `config.set failed: ${error}`))
-    const setMathFont = (value: string) => saved($.config.set({ key: 'latex.mathFont', value }))
-    const setColorScheme = (value: string) => saved($.config.set({ key: 'latex.colorScheme', value }))
-    const setUserBubble = (value: string) => saved($.config.set({ key: 'latex.userBubble', value }))
-    const setTellModel = (value: boolean) => saved($.config.set({ key: 'latex.tellModel', value }))
-    const setCopyButton = (value: boolean) => saved($.config.set({ key: 'latex.copyButton', value }))
-    const setTikz = (value: boolean) => saved($.config.set({ key: 'latex.tikz', value }))
+    const setMathFont = (value: string) => saved($.config.set({ key: 'latex.mathFont', value: value }))
+    const setColorScheme = (value: string) => saved($.config.set({ key: 'latex.colorScheme', value: value }))
+    const setUserBubble = (value: string) => saved($.config.set({ key: 'latex.userBubble', value: value }))
+    const setTellModel = (value: boolean) => saved($.config.set({ key: 'latex.tellModel', value: value }))
+    const setCopyButton = (value: boolean) => saved($.config.set({ key: 'latex.copyButton', value: value }))
+    const setTikz = (value: boolean) => saved($.config.set({ key: 'latex.tikz', value: value }))
     const toggle = (field: string, label: string, help: string, isOn: boolean, change: (value: boolean) => void) => (
       <Box flexDirection="column" marginBottom={1}>
         <Box flexDirection="row" gap={1}>
