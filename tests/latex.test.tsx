@@ -87,6 +87,7 @@ test('shows an unknown command as red source, not as an SVG', async $ => {
 function fakeTex(on: On, pages = 1) {
   const files = new Map<string, string>()
   const runs: string[][] = []
+  const sandboxed: boolean[] = []
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('fs.exists', async ($, e) => ({ value: e.path.startsWith('/Library/TeX/texbin/') || files.has(e.path) }))
   on('fs.write', async ($, e) => {
@@ -100,7 +101,12 @@ function fakeTex(on: On, pages = 1) {
       .map(p => ({ name: p.slice(e.path.length + 1), kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })),
   }))
   on('process.run', async ($, e) => {
-    runs.push([...e.argv])
+    // Compiles run inside sandbox-exec: look at the command it wraps.
+    const isSandboxed = e.argv[0] === '/usr/bin/sandbox-exec'
+    if (isSandboxed) sandboxed.push(true)
+    const argv = isSandboxed ? e.argv.slice(3) : [...e.argv]
+    runs.push(argv)
+    e = { ...e, argv }
     const cwd = e.init?.cwd ?? ''
     if (e.argv.includes('-ini')) {
       const job = e.argv.find(a => a.startsWith('-jobname='))?.slice('-jobname='.length)
@@ -120,14 +126,16 @@ function fakeTex(on: On, pages = 1) {
     if (e.argv[0] === '/bin/rm') for (const p of [...files.keys()]) if (p.startsWith(e.argv[2] + '/')) files.delete(p)
     return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  return { files, runs }
+  return { files, runs, sandboxed }
 }
 
 test('a LaTeX block redraws by itself once compiled', async ($, on) => {
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/Users/test', PATH: '' })
-  const { runs } = fakeTex(on)
+  const { runs, sandboxed, files } = fakeTex(on)
   await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  // The sandbox profile is written, probed and used for every TeX run.
+  expect(files.get('/Users/test/.cache/claude-latex/sandbox.sb')).toContain('(deny file-read* (subpath "/Users/test")')
   const text = 'A square:\n\n```tikzcd\nA \\arrow[r] & B\n```'
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
   expect(await ui.find({ type: 'Text', text: /Compiling with LaTeX/ })).toBeDefined()
@@ -136,6 +144,7 @@ test('a LaTeX block redraws by itself once compiled', async ($, on) => {
   // The compile used a saved format, built once in the background.
   expect(runs.some(argv => argv.includes('-ini'))).toBe(true)
   expect(runs.some(argv => argv.some(a => a.startsWith('-fmt=')))).toBe(true)
+  expect(sandboxed.length).toBeGreaterThan(2)
   expect(await ui.find({ type: 'Text', text: /Compiling with LaTeX/ })).toBeUndefined()
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
   await ui.unmount()

@@ -19,7 +19,7 @@ const adaptor = liteAdaptor()
 RegisterHTMLHandler(adaptor)
 const doc = mathjax.document('', {
   InputJax: new TeX({ packages: ['base', 'ams', 'newcommand', 'mhchem', 'physics', 'boldsymbol', 'cancel', 'color', 'braket', 'textmacros', 'mathtools'] }),
-  OutputJax: new SVG({ fontCache: 'none' }),
+  OutputJax: new SVG({ fontCache: 'local' }),
 })
 
 export function tex2svg(tex: string, display: boolean): string {

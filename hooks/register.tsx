@@ -70,6 +70,43 @@ const MAX_SVG_CHARS = 131072 - 400
 
 // Where latex and dvisvgm live, and where compiled SVGs are kept.
 let tex: { bin: string; cacheDir: string } | null = null
+// A macOS sandbox profile every TeX run goes through, when sandbox-exec works
+// here. A LaTeX block can \\input any file by its absolute path, and TeX's own
+// openin_any setting does not stop that, so the profile denies reading the
+// home folder apart from TeX's and the mod's own folders, and denies the
+// network and writes outside them.
+let sandbox: string | null = null
+const SANDBOX_EXEC = '/usr/bin/sandbox-exec'
+// TeX's own write guard: no writing outside the build folder.
+const TEX_ENV = { openout_any: 'p', openin_any: 'p' }
+
+function sandboxProfile(home: string, cacheDir: string): string {
+  const q = (path: string) => JSON.stringify(path)
+  return [
+    '(version 1)',
+    '(allow default)',
+    '(deny network*)',
+    `(deny file-read* (subpath ${q(home)}) (subpath "/Volumes"))`,
+    `(allow file-read* (subpath ${q(cacheDir)}) (subpath ${q(`${home}/Library/texlive`)}) (subpath ${q(`${home}/Library/texmf`)}) (subpath ${q(`${home}/texmf`)}))`,
+    '(deny file-write* (subpath "/"))',
+    `(allow file-write* (subpath ${q(cacheDir)}) (subpath ${q(`${home}/Library/texlive`)}) (subpath "/private/tmp") (subpath "/private/var/folders") (literal "/dev/null"))`,
+    '',
+  ].join('\n')
+}
+
+// Wraps a TeX command in the sandbox when there is one.
+function texArgv(argv: string[]): string[] {
+  return sandbox ? [SANDBOX_EXEC, '-f', sandbox, ...argv] : argv
+}
+
+async function setupSandbox($: Engine, home: string): Promise<void> {
+  if (!tex || !home) return
+  const path = `${tex.cacheDir}/sandbox.sb`
+  await $.fs.write(path, sandboxProfile(home, tex.cacheDir))
+  const probe = await $.process.run([SANDBOX_EXEC, '-f', path, '/usr/bin/true']).catch(() => null)
+  if (probe?.exitCode === 0) sandbox = path
+  else $.ui.log('latex: could not sandbox LaTeX here, so LaTeX blocks run without a sandbox', { to: 'debug' })
+}
 let macros = ''
 
 async function findTex($: Engine, home: string, path: string): Promise<boolean> {
@@ -101,8 +138,9 @@ async function buildFormat($: Engine, name: string, base: string): Promise<strin
   // looks while another builds never reads half a format.
   const temp = `${name}-${Math.random().toString(36).slice(2, 8)}`
   await $.fs.write(`${dir}/${temp}.tex`, `${base}\n\\dump\n`)
-  await $.process.run([`${tex!.bin}/latex`, '-ini', '-interaction=nonstopmode', `-jobname=${temp}`, '&latex', `${temp}.tex`], {
+  await $.process.run(texArgv([`${tex!.bin}/latex`, '-ini', '-interaction=nonstopmode', `-jobname=${temp}`, '&latex', `${temp}.tex`]), {
     cwd: dir,
+    env: TEX_ENV,
     timeoutMs: 120000,
   })
   if (!(await $.fs.exists(`${dir}/${temp}.fmt`))) return null
@@ -133,8 +171,8 @@ async function runTex($: Engine, dir: string, doc: TexDoc, dvisvgmArgs: string[]
   const latex = async (source: string, fmt: string | null) => {
     await $.fs.write(`${dir}/d.tex`, source)
     return $.process.run(
-      [`${bin}/latex`, ...(fmt ? [`-fmt=${fmt}`] : []), '-no-shell-escape', '-interaction=nonstopmode', '-halt-on-error', 'd.tex'],
-      { cwd: dir, timeoutMs: 60000 },
+      texArgv([`${bin}/latex`, ...(fmt ? [`-fmt=${fmt}`] : []), '-no-shell-escape', '-interaction=nonstopmode', '-halt-on-error', 'd.tex']),
+      { cwd: dir, env: TEX_ENV, timeoutMs: 60000 },
     )
   }
   try {
@@ -151,8 +189,9 @@ async function runTex($: Engine, dir: string, doc: TexDoc, dvisvgmArgs: string[]
       const isTexError = run.stdout.includes('\n!') || run.stdout.startsWith('!')
       return isTexError ? { error: texError(run.stdout) } : { error: 'The compile was interrupted.', interrupted: true }
     }
-    const dvisvgm = await $.process.run([`${bin}/dvisvgm`, '--no-fonts', '--precision=2', ...dvisvgmArgs, 'd.dvi'], {
+    const dvisvgm = await $.process.run(texArgv([`${bin}/dvisvgm`, '--no-fonts', '--precision=2', ...dvisvgmArgs, 'd.dvi']), {
       cwd: dir,
+      env: TEX_ENV,
       timeoutMs: 60000,
     })
     if (dvisvgm.exitCode !== 0) return { error: 'dvisvgm stopped before writing the SVG.', interrupted: true }
@@ -276,6 +315,7 @@ export const register: Register = (on, options) => {
       const ready = await findTex($, home, path).catch(() => false)
       if (!ready && latexFont) $.ui.log('latex: no latex and dvisvgm found, so math uses MathJax')
       if (ready) {
+        await setupSandbox($, home).catch(() => undefined)
         // A compile killed mid-run (a reload, a crash) leaves its folder.
         // Clear folders older than ten minutes, which no live compile uses.
         void $.process
