@@ -96,6 +96,15 @@ async function step($: Engine, name: string, run: () => Promise<unknown>): Promi
   }
 }
 
+// While a turn runs, its message is redrawn on every streamed chunk anyway,
+// and forcing extra redraws of a message mid-stream can stall the app's
+// drawing of it. So forced redraws wait for the turn to end. The flag clears
+// itself after ten minutes in case an end event is missed.
+let turnStartedAt = 0
+function isTurnRunning(): boolean {
+  return turnStartedAt > 0 && Date.now() - turnStartedAt < 10 * 60 * 1000
+}
+
 // Compiles queued blocks and formulas, up to MAX_WORKERS at once, and
 // redraws waiting messages as results land.
 let workersStarted = false
@@ -425,6 +434,19 @@ export const register: Register = (on, options) => {
     return started
   })
 
+  on('prompt.submit', async ($, e, next) => {
+    turnStartedAt = Date.now()
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    turnStartedAt = 0
+    // One redraw for everything that compiled during the turn.
+    await update($, version, n => n + 1).catch(() => undefined)
+    return done
+  })
+
   on('command.run', { command: 'latex' }, async $ => {
     await $.ui.open({ id: PANE, title: 'LaTeX settings' })
     return { text: 'Opened the LaTeX settings.' }
@@ -432,16 +454,21 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: ['AssistantMessage', 'UserMessage'] }, async ($, e, next) => {
     if (e.surface !== 'desktop' && e.surface !== 'mobile') return next(e)
+    const renderStarted = Date.now()
+    try {
     const isUser = e.component === 'UserMessage'
     if (isUser && (e.props.task || e.props.from || !OWN_MESSAGES.has(e.props.origin.kind))) return next(e)
     const text = isUser ? keepLineBreaks(e.props.text) : e.props.text
     const withMath = !isUser || renderUser
     const { Box } = $.ui.resolve(e)
-    // Your own messages sit in a light box, so they stay apart from replies.
+    // Your own messages sit in a rounded bubble on the right, sized to the
+    // text, so they stay apart from replies.
     const asYours = (tree: ReturnType<typeof drawMessage>) =>
       isUser ? (
-        <Box flexDirection="column" backgroundColor={USER_BUBBLE} paddingX={1} paddingY={1}>
-          {tree}
+        <Box flexDirection="row" justifyContent="flex-end">
+          <Box flexDirection="column" flexShrink={1} backgroundColor={USER_BUBBLE} borderStyle="round" borderColor={USER_BUBBLE} paddingX={1}>
+            {tree}
+          </Box>
         </Box>
       ) : (
         tree
@@ -521,6 +548,14 @@ export const register: Register = (on, options) => {
     // compiles. A finished message is never redrawn by them.
     if (isWaiting) await read($, version)
     return asYours(tree)
+    } catch (error) {
+      // Never leave a message undrawn: fall back to the app's own drawing.
+      debug($, `render error (${e.component}, ${e.props.text.length} chars): ${String(error)}`)
+      return next(e)
+    } finally {
+      const ms = Date.now() - renderStarted
+      if (ms > 150) debug($, `slow render ${ms} ms (${e.component}, ${e.props.text.length} chars)`)
+    }
   })
 
   // A one-time band above the prompt: what the mod does, where its settings are.
