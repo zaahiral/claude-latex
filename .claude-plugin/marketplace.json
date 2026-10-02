@@ -1,0 +1,14 @@
+{
+  "name": "claude-latex",
+  "description": "LaTeX rendering for Claude Code",
+  "owner": {
+    "name": "Zaahir Ali"
+  },
+  "plugins": [
+    {
+      "name": "latex",
+      "source": "./",
+      "description": "Render TeX maths and TikZ diagrams in Claude's replies in the Claude Code desktop app"
+    }
+  ]
+}

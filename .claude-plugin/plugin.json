@@ -1,0 +1,50 @@
+{
+  "name": "latex",
+  "displayName": "LaTeX",
+  "version": "0.2.0",
+  "description": "Render TeX maths and TikZ diagrams in Claude's replies in the Claude Code desktop app",
+  "author": {
+    "name": "Zaahir Ali"
+  },
+  "license": "MIT",
+  "keywords": [
+    "latex",
+    "math",
+    "mathjax",
+    "tikz",
+    "mod"
+  ],
+  "userConfig": {
+    "colorScheme": {
+      "type": "string",
+      "title": "Maths colour",
+      "description": "auto follows the system light or dark setting. Pick light or dark if the app's theme differs from the system's.",
+      "default": "auto",
+      "options": [
+        "auto",
+        "light",
+        "dark"
+      ]
+    },
+    "tikz": {
+      "type": "boolean",
+      "title": "Compile TikZ blocks",
+      "description": "Compile ```tikz and ```tikzcd code blocks with your local TeX install (latex and dvisvgm).",
+      "default": true
+    },
+    "userMessages": {
+      "type": "boolean",
+      "title": "Render maths in your messages",
+      "description": "Also render maths in the messages you send.",
+      "default": true
+    },
+    "macrosFile": {
+      "type": "string",
+      "title": "Macros file",
+      "description": "A .tex file of \\newcommand and \\DeclareMathOperator lines applied to every formula.",
+      "default": "~/.claude/latex-macros.tex"
+    }
+  },
+  "homepage": "https://github.com/zaahiral/claude-latex",
+  "repository": "https://github.com/zaahiral/claude-latex"
+}
