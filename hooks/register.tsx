@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 import { definePreamble, renderTex, withInk, type ColorScheme } from './math'
 import { drawMessage } from './draw'
-import { looksLikeMath, parse } from './parse'
+import { keepLineBreaks, looksLikeMath, parse } from './parse'
 import {
   BIN_CANDIDATES,
   documentForBlock,
@@ -39,6 +39,17 @@ import {
 // Goes up each time a compile finishes. Every message that draws math
 // reads it, so writing it redraws exactly those messages.
 const version = atom({ plugin: 'latex', key: 'version' } as const, 0)
+// The one-time welcome band. Shown until dismissed, then remembered in the
+// store across sessions.
+const intro = atom({ plugin: 'latex', key: 'intro' } as const, false)
+const INTRO_SEEN = 'introSeen'
+const PANE = 'latex-settings'
+
+// The user's own messages get Markdown. Notifications, agents and peers
+// keep the app's drawing.
+const OWN_MESSAGES = new Set(['composer', 'sdk', 'bridge', 'unclassified'])
+
+const FONT_CHOICES = ['mathjax', 'cm', 'libertinus', 'palatino', 'times', 'euler', 'concrete', 'fourier', 'stix2', 'kpfonts', 'cmbright']
 // Compiles run side by side, each in its own folder.
 const MAX_WORKERS = 3
 // Interrupted compiles are retried this many times.
@@ -231,9 +242,23 @@ export const register: Register = (on, options) => {
   const latexFont: LatexFont | null = isLatexFont(fontOption) ? fontOption : null
   const blocksOn = options.tikz !== false
   const renderUser = options.userMessages !== false
+  const userMarkdown = options.userMarkdown !== false
   const showCopy = options.copyButton === true
+  // The settings rows, by field: `latex.mathFont`, or `latex@inline.mathFont`
+  // for a plugin loaded from a folder. Filled at session start.
+  const configKeys = new Map<string, string>()
 
   on('session.start', async ($, e, next) => {
+    try {
+      for (const row of await $.config.list()) {
+        const m = row.key.match(/^latex(@[\w-]+)?\.(\w+)$/)
+        if (m?.[2]) configKeys.set(m[2], row.key)
+      }
+    } catch {
+      // No settings rows here (tests): the pane shows values without buttons.
+    }
+    await $.command.register({ name: 'latex', description: 'Open the LaTeX mod settings' }).catch(() => undefined)
+    if (!(await $.store.get(INTRO_SEEN).catch(() => true))) await update($, intro, () => true)
     const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
     const macrosPath = String(options.macrosFile || '~/.claude/latex-macros.tex').replace(/^~(?=\/)/, home)
     try {
@@ -308,12 +333,24 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  on('command.run', { command: 'latex' }, async $ => {
+    await $.ui.open({ id: PANE, title: 'LaTeX settings' })
+    return { text: 'Opened the LaTeX settings.' }
+  })
+
   on('ui.render', { component: ['AssistantMessage', 'UserMessage'] }, async ($, e, next) => {
-    if (e.component === 'UserMessage' && !renderUser) return next(e)
     if (e.surface !== 'desktop' && e.surface !== 'mobile') return next(e)
-    if (!looksLikeMath(e.props.text)) return next(e)
-    const pieces = parse(e.props.text, { blocks: blocksOn && tex !== null })
-    if (!pieces.some(p => p.kind !== 'md')) return next(e)
+    const isUser = e.component === 'UserMessage'
+    if (isUser && (e.props.task || e.props.from || !OWN_MESSAGES.has(e.props.origin.kind))) return next(e)
+    const text = isUser ? keepLineBreaks(e.props.text) : e.props.text
+    const withMath = !isUser || renderUser
+    const markdownOnly = () => {
+      const { Markdown } = $.ui.resolve(e)
+      return <Markdown text={text} />
+    }
+    if (!withMath || !looksLikeMath(text)) return isUser && userMarkdown ? markdownOnly() : next(e)
+    const pieces = parse(text, { blocks: blocksOn && tex !== null })
+    if (!pieces.some(p => p.kind !== 'md')) return isUser && userMarkdown ? markdownOnly() : next(e)
 
     const { Box, Text, Markdown, Svg, Button } = $.ui.resolve(e)
     const useLatex = latexFont !== null && tex !== null
@@ -373,5 +410,95 @@ export const register: Register = (on, options) => {
     // compiles. A finished message is never redrawn by them.
     if (isWaiting) await read($, version)
     return tree
+  })
+
+  // A one-time band above the prompt: what the mod does, where its settings are.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey || !(await read($, intro))) return next(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const dismiss = async () => {
+      await $.store.set(INTRO_SEEN, true)
+      await update($, intro, () => false)
+    }
+    return (
+      <Box flexDirection="column">
+        <Text bold>LaTeX mod is on</Text>
+        <Text dimColor>
+          Math, TikZ and LaTeX blocks in replies now render. You can pick one of 10 math fonts, turn Markdown in your messages on or off, and show a Copy TeX button.
+        </Text>
+        <Box flexDirection="row" gap={1}>
+          <Button
+            key="intro-settings"
+            label="Open settings"
+            variant="primary"
+            onPress={() => {
+              void dismiss()
+              void $.ui.open({ id: PANE, title: 'LaTeX settings' })
+            }}
+          />
+          <Button key="intro-dismiss" label="Got it" role="dismiss" onPress={() => void dismiss()} />
+        </Box>
+      </Box>
+    )
+  })
+
+  // The settings pane, opened by /latex or the welcome band. Each change goes
+  // through the app's own settings, which reloads the mod with the new value.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const elements = $.ui.resolve(e)
+    const { Box, Text, Button } = elements
+    // The mobile app has no Select. Show the value as text there.
+    const Select = 'Select' in elements ? elements.Select : undefined
+    const set = (field: string, value: string | boolean) => {
+      const key = configKeys.get(field)
+      if (key) void $.config.set({ key, value }).catch(() => undefined)
+    }
+    const toggle = (field: string, label: string, help: string, isOn: boolean) => (
+      <Box flexDirection="column" marginBottom={1}>
+        <Box flexDirection="row" gap={1}>
+          <Text bold>{label}</Text>
+          <Button key={`toggle-${field}`} label={isOn ? 'On' : 'Off'} variant={isOn ? 'primary' : 'secondary'} onPress={() => set(field, !isOn)} />
+        </Box>
+        <Text dimColor>{help}</Text>
+      </Box>
+    )
+    const fontValue = String(options.mathFont ?? 'mathjax')
+    const colorValue = String(options.colorScheme ?? 'auto')
+    return (
+      <Box flexDirection="column">
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>Math font</Text>
+          {Select ? (
+            <Select
+              key="math-font"
+              value={fontValue}
+              options={FONT_CHOICES.map(v => ({ value: v, label: v === 'mathjax' ? 'MathJax (instant)' : v }))}
+              onSelect={(value: string) => set('mathFont', value)}
+            />
+          ) : (
+            <Text>{fontValue}</Text>
+          )}
+          <Text dimColor>MathJax draws at once. Any other font is typeset by your own LaTeX, with MathJax shown until it is ready.</Text>
+        </Box>
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>Math color</Text>
+          {Select ? (
+            <Select
+              key="math-color"
+              value={colorValue}
+              options={[{ value: 'auto', label: 'Follow the system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]}
+              onSelect={(value: string) => set('colorScheme', value)}
+            />
+          ) : (
+            <Text>{colorValue}</Text>
+          )}
+        </Box>
+        {toggle('userMarkdown', 'Markdown in your messages', 'Your sent messages show bold, lists, code and tables.', userMarkdown)}
+        {toggle('userMessages', 'Math in your messages', 'Your sent messages render $...$ math.', renderUser)}
+        {toggle('copyButton', 'Copy TeX button', 'A button under each display formula and LaTeX block.', showCopy)}
+        {toggle('tikz', 'Compile LaTeX blocks', 'tikz, tikzcd and latex code blocks, using your TeX install.', blocksOn)}
+        <Text dimColor>Macros file: {String(options.macrosFile || '~/.claude/latex-macros.tex')}. Reopen this pane with /latex.</Text>
+      </Box>
+    )
   })
 }

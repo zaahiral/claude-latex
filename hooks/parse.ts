@@ -161,3 +161,24 @@ export function parse(text: string, options: { blocks: boolean }): Piece[] {
   flush()
   return pieces
 }
+
+// Markdown joins single line breaks into one line. A message someone typed
+// keeps its line breaks: each single newline outside a code fence becomes a
+// hard break.
+export function keepLineBreaks(text: string): string {
+  let fence: string | null = null
+  return text
+    .split('\n')
+    .map((line, i, lines) => {
+      const marker = line.match(FENCE_RE)
+      if (marker) {
+        if (fence === null) fence = marker[1] ?? '```'
+        else if (line.trim().startsWith(fence)) fence = null
+        return line
+      }
+      const next = lines[i + 1]
+      const isBreak = fence === null && next !== undefined && line.trim() !== '' && next.trim() !== ''
+      return isBreak ? `${line}  ` : line
+    })
+    .join('\n')
+}

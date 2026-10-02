@@ -1,7 +1,7 @@
 {
   "name": "latex",
   "displayName": "LaTeX",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Render TeX math, TikZ diagrams and LaTeX blocks in Claude's replies in the Claude Code desktop app, in any of 10 LaTeX fonts",
   "author": {
     "name": "Zaahir Ali"
@@ -50,6 +50,12 @@
       "type": "boolean",
       "title": "Compile LaTeX blocks",
       "description": "Compile ```tikz, ```tikzcd and ```latex code blocks with your local TeX install (latex and dvisvgm).",
+      "default": true
+    },
+    "userMarkdown": {
+      "type": "boolean",
+      "title": "Markdown in your messages",
+      "description": "Show the messages you send with Markdown formatting (bold, lists, code, tables), the way Claude's replies are shown.",
       "default": true
     },
     "userMessages": {

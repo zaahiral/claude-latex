@@ -180,3 +180,72 @@ test('draws Copy TeX buttons when the setting is on', { options: { copyButton: t
   expect(await ui.find({ type: 'Button', key: 'copy-0' })).toBeDefined()
   await ui.unmount()
 })
+
+const own = (text: string) => ({ text, origin: { kind: 'composer' }, isExpanded: true }) as never
+
+test('renders your own message as Markdown and keeps its line breaks', async $ => {
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('**bold** and a list:\n- one\n- two\nline one\nline two') })
+  const md = await ui.find({ type: 'Markdown' })
+  expect(md).toBeDefined()
+  expect(String(md?.props.text)).toContain('line one  \nline two')
+  await ui.unmount()
+})
+
+test('leaves your messages to the app when Markdown is off', { options: { userMarkdown: false } }, async ($, on) => {
+  on('ui.render', async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine drew this</Text>
+  })
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props: own('**bold**') })
+  expect(await ui.find({ type: 'Text', text: /engine drew/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('leaves task notifications to the app', async ($, on) => {
+  on('ui.render', async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine drew this</Text>
+  })
+  const props = { text: '**done**', origin: { kind: 'task-notification' }, isExpanded: true } as never
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'UserMessage', props })
+  expect(await ui.find({ type: 'Text', text: /engine drew/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('shows the welcome band once, and Got it remembers', async ($, on) => {
+  mock.store(on)
+  on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  on('config.list', async () => ({ value: [] }))
+  on('ui.render', async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine drew this</Text>
+  })
+  const bandProps = { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 80 } as never
+  await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  const band = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AbovePrompt', props: bandProps })
+  expect(await band.find({ type: 'Text', text: /LaTeX mod is on/ })).toBeDefined()
+  await band.press({ key: 'intro-dismiss' })
+  expect(await band.find({ type: 'Text', text: /LaTeX mod is on/ })).toBeUndefined()
+  await band.unmount()
+  // A new session reads the store and keeps the band hidden.
+  await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  const again = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AbovePrompt', props: bandProps })
+  expect(await again.find({ type: 'Text', text: /LaTeX mod is on/ })).toBeUndefined()
+  await again.unmount()
+})
+
+test('the settings pane changes the real settings', async ($, on) => {
+  const sets: unknown[] = []
+  on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  on('config.list', async () => ({ value: [{ key: 'latex.copyButton', label: 'Copy TeX button', kind: 'boolean', value: false, provider: { kind: 'plugin', name: 'latex' }, isLocked: false }] as never }))
+  on('config.set', async ($, e) => {
+    sets.push(e)
+    return { value: { value: e.value } as never }
+  })
+  await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'Pane', props: { title: 'LaTeX settings', isFocused: true, bodyColumns: 60, placement: 'dock' } as never, requestId: 'latex-settings' } as never)
+  expect(await pane.find({ type: 'Select', key: 'math-font' })).toBeDefined()
+  await pane.press({ key: 'toggle-copyButton' })
+  expect(sets).toEqual([expect.objectContaining({ key: 'latex.copyButton', value: true })])
+  await pane.unmount()
+})
