@@ -1,3 +1,4 @@
+import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 const SAMPLE = [
@@ -82,7 +83,7 @@ test('shows an unknown command as red source, not as an SVG', async $ => {
 })
 
 // A fake TeX install: latex writes d.dvi, dvisvgm writes one SVG per page.
-function fakeTex(on: Parameters<Parameters<typeof test>[1]>[1], pages = 1) {
+function fakeTex(on: On, pages = 1) {
   const files = new Map<string, string>()
   const runs: string[][] = []
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -106,7 +107,7 @@ function fakeTex(on: Parameters<Parameters<typeof test>[1]>[1], pages = 1) {
       else for (let i = 1; i <= pages; i++) files.set(`${cwd}/d-${i}.svg`, `<svg width='${i}pt' height='5pt'></svg>`)
     }
     if (e.argv[0] === '/bin/rm') for (const p of [...files.keys()]) if (p.startsWith(e.argv[2] + '/')) files.delete(p)
-    return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   return { files, runs }
 }

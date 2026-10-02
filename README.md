@@ -134,6 +134,8 @@ claude --plugin-dir ./claude-latex
 claude plugin test ./claude-latex
 ```
 
+The tests need Claude Code 2.1.286 or later. They fake `latex` and `dvisvgm`, so they run without a TeX install.
+
 ## Licence
 
 MIT. MathJax is Apache 2.0, and its licence is in `hooks/mathjax/LICENSE`. Clawd is Anthropic's Claude Code mascot. The logo is drawn in TikZ in `assets/logo.tex`.
