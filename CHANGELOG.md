@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A **Math size** setting: type the height of a lowercase x in pixels, from 4 to 20, in `/latex`. The default, 7, draws as before and matches the text. Formulas typeset in a LaTeX font follow it too. Diagrams and LaTeX blocks keep their size.
+
 ## 0.5.0
 
 - Your messages can render as Markdown with math, in a bubble. This is the experimental `rendered` value of the new **Your messages** setting. The app's own row stays under the bubble as a small pill, so the time, rewind and fork controls are kept. Your messages are now left as typed by default. `under` brings back the math under the app's bubble.

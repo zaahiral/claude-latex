@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
-import { definePreamble, renderTex, withInk, type ColorScheme } from './math'
+import { DEFAULT_PX_PER_EX, definePreamble, renderTex, setPxPerEx, withInk, type ColorScheme } from './math'
 import { drawMessage } from './draw'
 import { keepLineBreaks, looksLikeMarkdown, looksLikeMath, mathOnly, parse } from './parse'
 import {
@@ -79,6 +79,20 @@ A mod draws TeX in your replies here. Write math as TeX, never as Unicode symbol
 const CONTROLS_ROW_TEXT = '⋯'
 
 const FONT_CHOICES = ['mathjax', 'cm', 'libertinus', 'palatino', 'times', 'euler', 'concrete', 'fourier', 'stix2', 'kpfonts', 'cmbright']
+// Math size, in pixels per ex: about the height of a lowercase x. The
+// default matches the Code tab's text. Diagrams and LaTeX blocks keep their
+// size.
+const MIN_SIZE = 4
+const MAX_SIZE = 20
+// The Math size as a factor of the default, for formulas typeset in a LaTeX font.
+let mathScale = 1
+
+// A Math size typed or stored: a number in range, or undefined.
+function sizeOf(value: unknown): number | undefined {
+  const text = String(value ?? '').trim()
+  const px = Number(text)
+  return text !== '' && px >= MIN_SIZE && px <= MAX_SIZE ? px : undefined
+}
 // Compiles run side by side, each in its own folder.
 const MAX_WORKERS = 3
 // Interrupted compiles are retried this many times.
@@ -361,7 +375,7 @@ async function compileMath($: Engine, jobs: MathJob[], font: LatexFont): Promise
   const batchDir = `${tex!.cacheDir}/build/m-${hashOf(...todo.map(job => job.key))}`
   const out = await runTex($, batchDir, documentForMath(todo, font, macros), [
     '--bbox=papersize',
-    '--zoom=1.2',
+    `--zoom=${Number((1.2 * mathScale).toFixed(3))}`,
     '-p',
     '1-',
   ])
@@ -403,6 +417,10 @@ export const register: Register = (on, options) => {
   const bubbleMode: BubbleMode = BUBBLE_MODES.find(mode => mode === options.userBubble) ?? 'off'
   const showCopy = options.copyButton === true
   const tellModel = options.tellModel !== false
+  const mathSize = sizeOf(options.mathSize) ?? DEFAULT_PX_PER_EX
+  const sizeValue = String(mathSize)
+  mathScale = mathSize / DEFAULT_PX_PER_EX
+  setPxPerEx(mathSize)
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -591,7 +609,7 @@ export const register: Register = (on, options) => {
             ? [{ tex: p.tex, display: true }]
             : p.lines.flatMap(l => l.spans.flatMap(sp => (sp.kind === 'math' ? [{ tex: sp.tex, display: false }] : [])))
         for (const f of formulas) {
-          const key = hashOf('math', latexFont, f.display ? 'D' : 'I', macros, f.tex)
+          const key = hashOf('math', latexFont, sizeValue, f.display ? 'D' : 'I', macros, f.tex)
           if (!resultOf(key)) await fromDisk($, `m-${key}.svg`, key)
         }
       }
@@ -601,7 +619,7 @@ export const register: Register = (on, options) => {
       el: { Box, Text, Markdown, Svg, Button, Link },
       formula: (source, display) => {
         if (useLatex) {
-          const key = hashOf('math', latexFont, display ? 'D' : 'I', macros, source)
+          const key = hashOf('math', latexFont, sizeValue, display ? 'D' : 'I', macros, source)
           const typeset = resultOf(key)
           if (typeset && 'svg' in typeset) return count(withInk(typeset.svg, scheme))
           if (!typeset) {
@@ -695,13 +713,22 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box, Text, Button } = elements
-    // The mobile app has no Select. Show the value as text there.
+    // The mobile app has no Select or Input. Show the value as text there.
     const Select = 'Select' in elements ? elements.Select : undefined
+    const Input = 'Input' in elements ? elements.Input : undefined
     // Each call names its setting in full, so the plugin directory can read
     // which settings the pane changes. A change reloads the mod.
     const saved = (change: Promise<unknown>) => void change.catch(error => debug($, `config.set failed: ${error}`))
     const setMathFont = (value: string) => saved($.config.set({ key: 'latex.mathFont', value: value }))
     const setColorScheme = (value: string) => saved($.config.set({ key: 'latex.colorScheme', value: value }))
+    const setMathSize = (value: string) => saved($.config.set({ key: 'latex.mathSize', value: value }))
+    // An empty field goes back to the default.
+    const submitMathSize = (typed: string) => {
+      if (typed.trim() === '') return setMathSize('')
+      const px = sizeOf(typed)
+      if (px === undefined) return $.ui.toast(`Math size is a number from ${MIN_SIZE} to ${MAX_SIZE}`)
+      setMathSize(String(px))
+    }
     const setUserBubble = (value: string) => saved($.config.set({ key: 'latex.userBubble', value: value }))
     const setTellModel = (value: boolean) => saved($.config.set({ key: 'latex.tellModel', value: value }))
     const setCopyButton = (value: boolean) => saved($.config.set({ key: 'latex.copyButton', value: value }))
@@ -745,6 +772,21 @@ export const register: Register = (on, options) => {
           ) : (
             <Text>{colorValue}</Text>
           )}
+        </Box>
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>Math size</Text>
+          {Input ? (
+            <Input
+              key="math-size"
+              placeholder={String(DEFAULT_PX_PER_EX)}
+              value={mathSize === DEFAULT_PX_PER_EX ? '' : sizeValue}
+              submitLabel="set"
+              onSubmit={submitMathSize}
+            />
+          ) : (
+            <Text>{sizeValue}</Text>
+          )}
+          <Text dimColor>{`The height of a lowercase x in pixels, from ${MIN_SIZE} to ${MAX_SIZE}. ${DEFAULT_PX_PER_EX} matches the text; leave it empty for that. Diagrams and LaTeX blocks keep their size.`}</Text>
         </Box>
         <Box flexDirection="column" marginBottom={1}>
           <Text bold>Your messages</Text>

@@ -145,6 +145,33 @@ test('lays out lists with inline math', async $ => {
   await ui.unmount()
 })
 
+// The width of the one formula drawn for `text`, in pixels.
+async function formulaWidth($: Parameters<Parameters<typeof test>[1]>[0], text: string): Promise<number> {
+  const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply(text) })
+  const svgs = await ui.findAll({ type: 'Svg' })
+  await ui.unmount()
+  expect(svgs).toHaveLength(1)
+  return parseFloat(String(svgs[0]?.props.source).match(/ width="([\d.]+)px"/)?.[1] ?? 'NaN')
+}
+
+let defaultWidth = NaN
+
+test('draws math at the default size', async $ => {
+  defaultWidth = await formulaWidth($, '$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$')
+  expect(defaultWidth).toBeGreaterThan(0)
+})
+
+test('the Math size setting scales formulas', { options: { mathSize: '9' } }, async $ => {
+  const width = await formulaWidth($, '$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$')
+  // Widths are rounded to 0.1 px.
+  expect(width / defaultWidth).toBeGreaterThan(9 / 7 - 0.01)
+  expect(width / defaultWidth).toBeLessThan(9 / 7 + 0.01)
+})
+
+test('a Math size out of range draws at the default size', { options: { mathSize: '200' } }, async $ => {
+  expect(await formulaWidth($, '$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$')).toBe(defaultWidth)
+})
+
 test('maps \\bm to bold math', async $ => {
   const ui = await $.ui.mount({ plugin: 'latex', surface: 'desktop', component: 'AssistantMessage', props: reply('A vector $\\bm{x} \\in \\mathbb{R}^n$.') })
   expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
@@ -370,11 +397,34 @@ test('the settings pane changes the real settings', async ($, on) => {
   await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount<'desktop', 'Pane'>({ plugin: 'latex', surface: 'desktop', component: 'Pane', props: { title: 'LaTeX settings', isFocused: true, bodyColumns: 60, placement: 'dock' } as never, requestId: 'latex-settings' } as never)
   expect(await pane.find({ type: 'Select', key: 'math-font' })).toBeDefined()
+  expect(await pane.find({ type: 'Input', key: 'math-size' })).toBeDefined()
   await pane.press({ key: 'toggle-copyButton' })
   await pane.select({ key: 'math-font', value: 'euler' })
   expect(sets).toEqual([
     expect.objectContaining({ key: 'latex.copyButton', value: true }),
     expect.objectContaining({ key: 'latex.mathFont', value: 'euler' }),
+  ])
+  await pane.unmount()
+})
+
+test('Math size is typed in the settings pane, and a number out of range is refused', async ($, on) => {
+  const sets: unknown[] = []
+  on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  on('config.list', async () => ({ value: [] }))
+  on('config.set', async ($, e) => {
+    sets.push(e)
+    return { value: e.value }
+  })
+  await $.session.start({ cwd: '/work', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount<'desktop', 'Pane'>({ plugin: 'latex', surface: 'desktop', component: 'Pane', props: { title: 'LaTeX settings', isFocused: true, bodyColumns: 60, placement: 'dock' } as never, requestId: 'latex-settings' } as never)
+  const field = await pane.find({ type: 'Input', key: 'math-size' })
+  expect(field?.props.placeholder).toBe('7')
+  await pane.input({ key: 'math-size', text: '9' })
+  await pane.input({ key: 'math-size', text: '200' })
+  await pane.input({ key: 'math-size', text: '' })
+  expect(sets).toEqual([
+    expect.objectContaining({ key: 'latex.mathSize', value: '9' }),
+    expect.objectContaining({ key: 'latex.mathSize', value: '' }),
   ])
   await pane.unmount()
 })

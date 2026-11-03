@@ -76,6 +76,7 @@ Run `/latex` to open the settings pane. Each change applies at once.
 | --- | --- | --- |
 | Math font | `mathjax` | MathJax, or one of 10 LaTeX fonts typeset by your TeX install |
 | Math color | `auto` | `auto` follows your system's light or dark setting. Pick `light` or `dark` if the app's theme differs |
+| Math size | `7` | How large formulas are drawn: the height of a lowercase x in pixels, from 4 to 20. `7` matches the text. Diagrams and LaTeX blocks keep their size |
 | Compile LaTeX blocks | on | Compile ` ```tikz `, ` ```tikzcd ` and ` ```latex ` blocks |
 | Math under your messages | on | Show the math and diagrams from your messages under the bubble |
 | Full rendered copy of your messages | off | Show your whole message rendered under the bubble |

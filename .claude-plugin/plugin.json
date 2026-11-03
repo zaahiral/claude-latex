@@ -28,6 +28,12 @@
       "description": "auto, light or dark. auto follows the system light or dark setting. Pick light or dark if the app's theme differs from the system's.",
       "default": "auto"
     },
+    "mathSize": {
+      "type": "string",
+      "title": "Math size",
+      "description": "How large formulas are drawn: the height of a lowercase x in pixels, from 4 to 20. Empty or 7 matches the Code tab's text. Diagrams and LaTeX blocks keep their size. Easiest to set in /latex.",
+      "default": ""
+    },
     "tikz": {
       "type": "boolean",
       "title": "Compile LaTeX blocks",

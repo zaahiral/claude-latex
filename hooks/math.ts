@@ -4,9 +4,11 @@ import { definePreamble as keepMacros, tex2svg } from './mathjax/entry.js'
 
 export type ColorScheme = 'auto' | 'light' | 'dark'
 
-// CSS pixels per MathJax ex. MathJax lays out at ex = 8px for a 16px font.
-// The Code tab's text is smaller, so scale down to match.
-const PX_PER_EX = 7
+// CSS pixels per MathJax ex, the Math size setting. MathJax lays out at
+// ex = 8px for a 16px font. The Code tab's text is smaller, so the default
+// scales down to match.
+export const DEFAULT_PX_PER_EX = 7
+let pxPerEx = DEFAULT_PX_PER_EX
 // Height of the text's vertical center above its baseline, in ex. A row of
 // words and formulas is centered on this line, so each inline SVG is padded
 // to put its baseline this far below its own center.
@@ -73,8 +75,16 @@ function centerBaseline(svg: string): string {
 
 function exToPx(svg: string): string {
   return svg
-    .replace(/ width="([\d.]+)ex"/, (_, w) => ` width="${(parseFloat(w) * PX_PER_EX).toFixed(1)}px"`)
-    .replace(/ height="([\d.]+)ex"/, (_, h) => ` height="${(parseFloat(h) * PX_PER_EX).toFixed(1)}px"`)
+    .replace(/ width="([\d.]+)ex"/, (_, w) => ` width="${(parseFloat(w) * pxPerEx).toFixed(1)}px"`)
+    .replace(/ height="([\d.]+)ex"/, (_, h) => ` height="${(parseFloat(h) * pxPerEx).toFixed(1)}px"`)
+}
+
+// Sets the Math size, in pixels per ex. The cache holds SVGs at the old size,
+// so a new size empties it.
+export function setPxPerEx(px: number): void {
+  if (px === pxPerEx) return
+  pxPerEx = px
+  cache.clear()
 }
 
 // MathJax gives the rules of an array (\hline, the | in {cc|c}) their width
